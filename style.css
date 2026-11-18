@@ -22556,12 +22556,3 @@ html[data-theme="light"] .act-kpi-symbol, html[data-theme="light"] .act-kpi-link
 #act-install-banner .ib-text b { display: block; font-size: 14px; }
 #act-install-banner button { border: 0; border-radius: 10px; padding: 9px 14px; font: inherit; font-weight: 800; font-size: 13px; cursor: pointer; background: #0a74d6; color: #fff; }
 #act-install-banner button.ib-close { background: transparent; color: var(--text-soft); padding: 6px 8px; font-size: 18px; }
-
-/* ACT V48 — purchases multi-item layout mirrors the sales invoice UI */
-.ind-purchase-extra-items{display:grid;gap:10px}
-.ind-purchase-extra-item{grid-template-columns:repeat(4,minmax(0,1fr)) auto;align-items:end;padding:13px;border:1px solid rgba(255,255,255,.07);border-radius:14px;background:rgba(255,255,255,.03)}
-.ind-purchase-extra-item .sales-field{min-width:0;display:grid;gap:7px;font-size:13px;font-weight:700}
-.ind-purchase-extra-item input,.ind-purchase-extra-item select{width:100%;min-width:0;box-sizing:border-box;padding:10px 11px;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:var(--input-bg,#141414);color:inherit;font:inherit}
-#ind-purchase-add-item{width:auto;min-height:42px;padding:10px 14px;border:1px solid rgba(255,255,255,.09);border-radius:10px;background:rgba(255,255,255,.07);color:var(--text-primary,#e4e6eb);font:inherit;font-weight:800;cursor:pointer}
-.ind-purchase-extra-item .sale-remove-item{min-height:40px}
-@media(max-width:760px){.ind-purchase-extra-item{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;padding:10px}.ind-purchase-extra-item .sale-remove-item{grid-column:1/-1;width:100%}#ind-purchase-add-item{width:100%}}

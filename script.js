@@ -19956,10 +19956,10 @@ document.addEventListener("DOMContentLoaded", function () {
     function addPurchaseInvoiceItem() {
         if (!extraPurchaseItemsHost) return;
         const row = document.createElement("div");
-        row.className = "ind-purchase-extra-item sale-extra-item-row";
+        row.className = "ind-purchase-extra-item";
         row.dataset.purchaseItem = String(++purchaseItemSequence);
-        
-        row.innerHTML = `<div class="sales-field"><label>نوع الصنف</label><select data-extra-category><option value="phones">📱 تلفون</option><option value="accessories">🎧 إكسسوار</option><option value="parts">🔧 قطعة غيار</option></select></div><div class="sales-field"><label>اسم الصنف</label><input data-extra-product type="text" placeholder="اسم المنتج" required></div><div class="sales-field"><label>الكمية</label><input data-extra-quantity type="number" min="1" step="1" value="1" required></div><div class="sales-field"><label>سعر القطعة</label><input data-extra-price type="number" min="0" step="0.01" value="0" required></div><button type="button" class="sale-remove-item" data-remove-extra>حذف الصنف ✕</button>`;
+        row.style.cssText = "display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;padding:14px;border:1px solid #64748b55;border-radius:12px;background:var(--input-bg,#0b1626);";
+        row.innerHTML = `<label>نوع الصنف<select data-extra-category><option value="phones">📱 تلفون</option><option value="accessories">🎧 إكسسوار</option><option value="parts">🔧 قطعة غيار</option></select></label><label>اسم الصنف<input data-extra-product type="text" placeholder="اسم المنتج" required></label><label>الكمية<input data-extra-quantity type="number" min="1" step="1" value="1" required></label><label>سعر القطعة<input data-extra-price type="number" min="0" step="0.01" value="0" required></label><div style="display:flex;align-items:end;"><button type="button" data-remove-extra style="padding:10px 14px;border:0;border-radius:9px;cursor:pointer;">حذف الصنف ✕</button></div>`;
         extraPurchaseItemsHost.appendChild(row);
         row.querySelector("[data-remove-extra]").addEventListener("click", () => { row.remove(); updatePreview(); });
         row.addEventListener("input", updatePreview);
@@ -20114,89 +20114,6 @@ function savePurchases() {
             Math.random().toString(36).slice(2);
     }
 
-    function userScopedKey(type) {
-        try { return typeof getUserKey === "function" ? getUserKey(type) : `actPhoneManager_${type}_guest`; }
-        catch (_) { return `actPhoneManager_${type}_guest`; }
-    }
-
-    function readStoredRows(key) {
-        try { const value = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(value) ? value : []; }
-        catch (error) { console.warn("Purchase department read failed", key, error); return []; }
-    }
-
-    function writeStoredRows(key, rows) {
-        try {
-            const raw = JSON.stringify(rows);
-            localStorage.setItem(key, raw);
-            if (typeof saveUserDataToCloud === "function") saveUserDataToCloud(key, raw);
-            return true;
-        } catch (error) { console.error("Purchase department save failed", key, error); return false; }
-    }
-
-    function normalizePurchaseName(value) {
-        return String(value || "").trim().toLocaleLowerCase("ar").replace(/[أإآ]/g, "ا").replace(/\s+/g, " ");
-    }
-
-    // Route each invoice line into its own stock department while keeping the shared invoiceId.
-    function applyPurchaseDepartmentChange(oldLine, newLine, invoiceId) {
-        const oldCategory = oldLine?.category || "";
-        const newCategory = newLine?.category || "";
-        const oldName = oldLine?.product || "";
-        const newName = newLine?.product || "";
-        const oldQty = Number(oldLine?.quantity) || 0;
-        const newQty = Number(newLine?.quantity) || 0;
-
-        if (oldCategory === "phones" && (newCategory !== "phones" || String(oldLine?.id) !== String(newLine?.id))) {
-            window.actPhoneInventoryRemovePurchase?.("independent", oldLine);
-        }
-        if (newCategory === "phones") {
-            window.actPhoneInventoryUpsertPurchase?.("independent", newLine, oldCategory === "phones" ? oldLine : null);
-        }
-
-        if (oldCategory === "accessories" && (newCategory !== "accessories" || normalizePurchaseName(oldName) !== normalizePurchaseName(newName))) {
-            const key = userScopedKey("accessories"), rows = readStoredRows(key), match = rows.find(x => normalizePurchaseName(x.name) === normalizePurchaseName(oldName));
-            if (match) match.quantity = Math.max(0, (Number(match.quantity) || 0) - oldQty);
-            if (!writeStoredRows(key, rows)) return false;
-        }
-        if (newCategory === "accessories") {
-            const key = userScopedKey("accessories"), rows = readStoredRows(key);
-            let item = rows.find(x => normalizePurchaseName(x.name) === normalizePurchaseName(newName));
-            const addedQty = oldCategory === "accessories" && normalizePurchaseName(oldName) === normalizePurchaseName(newName) ? newQty - oldQty : newQty;
-            if (!item && addedQty > 0) {
-                item = { id: "acc_purchase_" + makeId(), name: newName, code: "", quantity: 0, cost: Number(newLine.unitPrice) || 0, price: 0, createdAt: new Date().toISOString() };
-                rows.unshift(item);
-            }
-            if (item) {
-                item.quantity = Math.max(0, (Number(item.quantity) || 0) + addedQty);
-                item.cost = Number(newLine.unitPrice) || Number(item.cost) || 0;
-                item.updatedAt = new Date().toISOString();
-                item.lastPurchaseInvoiceId = invoiceId;
-            }
-            if (!writeStoredRows(key, rows)) return false;
-            const movementKey = userScopedKey("accessoryMovements"), movements = readStoredRows(movementKey);
-            if (addedQty !== 0) movements.unshift({ id: "accmove_" + makeId(), itemId: item?.id || "", name: newName, kind: addedQty > 0 ? "purchase" : "purchase_adjustment", quantity: Math.abs(addedQty), delta: addedQty, unitPrice: Number(newLine.unitPrice) || 0, total: Math.abs(addedQty) * (Number(newLine.unitPrice) || 0), invoiceId, date: new Date().toISOString() });
-            writeStoredRows(movementKey, movements);
-            window.dispatchEvent(new Event("act-accessories-data-updated"));
-        }
-
-        // Parts have no dedicated stock screen in this build; keep a separate, user-scoped parts stock ledger.
-        if (oldCategory === "parts" || newCategory === "parts") {
-            const key = userScopedKey("spareParts"), rows = readStoredRows(key);
-            if (oldCategory === "parts") {
-                const oldItem = rows.find(x => normalizePurchaseName(x.name) === normalizePurchaseName(oldName));
-                if (oldItem && (newCategory !== "parts" || normalizePurchaseName(oldName) !== normalizePurchaseName(newName))) oldItem.quantity = Math.max(0, (Number(oldItem.quantity) || 0) - oldQty);
-            }
-            if (newCategory === "parts") {
-                let item = rows.find(x => normalizePurchaseName(x.name) === normalizePurchaseName(newName));
-                const addedQty = oldCategory === "parts" && normalizePurchaseName(oldName) === normalizePurchaseName(newName) ? newQty - oldQty : newQty;
-                if (!item && addedQty > 0) { item = { id: "part_purchase_" + makeId(), name: newName, quantity: 0, cost: Number(newLine.unitPrice) || 0, createdAt: new Date().toISOString() }; rows.unshift(item); }
-                if (item) { item.quantity = Math.max(0, (Number(item.quantity) || 0) + addedQty); item.cost = Number(newLine.unitPrice) || Number(item.cost) || 0; item.lastPurchaseInvoiceId = invoiceId; item.updatedAt = new Date().toISOString(); }
-            }
-            if (!writeStoredRows(key, rows)) return false;
-        }
-        return true;
-    }
-
     function escapeHTML(value) {
         return String(value == null ? "" : value).replace(
             /[&<>"']/g,
@@ -20222,7 +20139,7 @@ function savePurchases() {
         }, 0);
 
         if (countElement) {
-            countElement.textContent = purchases.length.toLocaleString("ar-EG");
+            countElement.textContent = new Set(purchases.map(item => item.invoiceId || ("single-" + item.id))).size.toLocaleString("ar-EG");
         }
 
         if (totalElement) {
@@ -20237,87 +20154,69 @@ function savePurchases() {
 
     function renderPurchases() {
         updateStats();
-
         const query = searchInput.value.trim().toLocaleLowerCase();
-
-        const filtered = purchases.filter(function (purchase) {
-            const searchable = [
-                purchase.product,
-                purchase.supplier,
-                purchase.date,
-                purchase.notes,
-                categoryNames[purchase.category] || purchase.category
-            ].join(" ").toLocaleLowerCase();
-
-            return searchable.includes(query);
+        const matches = purchases.filter(function (purchase) {
+            return [purchase.product, purchase.supplier, purchase.date, purchase.notes,
+                purchase.invoiceId, categoryNames[purchase.category] || purchase.category]
+                .join(" ").toLocaleLowerCase().includes(query);
         });
-
-        if (filtered.length === 0) {
-            purchasesList.innerHTML =
-                '<div class="ind-purchases-empty">' +
-                (
-                    purchases.length
-                        ? "لا توجد نتائج مطابقة للبحث."
-                        : "لا توجد عمليات شراء مسجلة حتى الآن."
-                ) +
-                "</div>";
+        if (!matches.length) {
+            purchasesList.innerHTML = '<div class="ind-purchases-empty">' +
+                (purchases.length ? "لا توجد نتائج مطابقة للبحث." : "لا توجد عمليات شراء مسجلة حتى الآن.") + '</div>';
             return;
         }
-
-        purchasesList.innerHTML = filtered.map(function (purchase) {
+        const grouped = new Map();
+        matches.forEach(function (purchase) {
+            const key = purchase.invoiceId || ("single-" + purchase.id);
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key).push(purchase);
+        });
+        purchasesList.innerHTML = Array.from(grouped.entries()).map(function ([invoiceId, lines]) {
+            const first = lines[0];
+            const total = lines.reduce((sum, item) => sum + Number(item.total || 0), 0);
+            const paid = lines.reduce((sum, item) => sum + Number(item.paid || 0), 0);
+            const quantity = lines.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+            const cardId = "purchase-invoice-" + String(invoiceId).replace(/[^a-zA-Z0-9_-]/g, "");
             return `
-                <article class="ind-purchase-record"
-                    style="padding:16px;margin-bottom:12px;border:1px solid #64748b55;border-radius:14px;background:var(--input-bg,#0b1626);">
-
-                    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-                        <div>
-                            <strong style="font-size:17px;">
-                                ${escapeHTML(purchase.product)}
-                            </strong>
-                            <div style="opacity:.85;margin-top:7px;display:grid;gap:5px;">
-                                <span><b>نوع الصنف:</b> ${escapeHTML(categoryNames[purchase.category] || "مشتريات")}</span>
-                                <span><b>اسم المورد:</b> ${escapeHTML(purchase.supplier || "غير محدد")}</span>
-                                ${purchase.invoiceId ? `<span><b>رقم الفاتورة المشتركة:</b> ${escapeHTML(purchase.invoiceId.slice(-8))} · <b>الصنف:</b> ${Number(purchase.invoiceLine)||1} من ${Number(purchase.invoiceLinesCount)||1}</span>` : ""}
-                            </div>
-                        </div>
-
-                        <strong style="color:#38bdf8;">
-                            ${escapeHTML(money(purchase.total))}
-                        </strong>
-                    </div>
-
-                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:14px;font-size:13px;">
-                        <div><b>الكمية:</b> ${escapeHTML(purchase.quantity)}</div>
-                        <div><b>سعر القطعة:</b> ${escapeHTML(money(purchase.unitPrice))}</div>
-                        <div><b>إجمالي الصنف:</b> ${escapeHTML(money(purchase.total))}</div>
-                        <div><b>المدفوع:</b> ${escapeHTML(money(purchase.paid))}</div>
-                        <div><b>التاريخ:</b> ${escapeHTML(purchase.date)}</div>
-                    </div>
-
-                    ${purchase.notes ? `
-                        <div style="margin-top:12px;opacity:.8;white-space:pre-wrap;">
-                            ملاحظات: ${escapeHTML(purchase.notes)}
-                        </div>
-                    ` : ""}
-
-                    <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:15px;">
-                        <button type="button"
-                            data-purchase-action="edit"
-                            data-purchase-id="${escapeHTML(purchase.id)}"
-                            style="padding:9px 15px;border:0;border-radius:9px;cursor:pointer;">
-                            ✏️ تعديل
-                        </button>
-
-                        <button type="button"
-                            data-purchase-action="delete"
-                            data-purchase-id="${escapeHTML(purchase.id)}"
-                            style="padding:9px 15px;border:0;border-radius:9px;cursor:pointer;">
-                            🗑️ حذف
-                        </button>
-                    </div>
-                </article>
-            `;
+              <article class="ind-purchase-record ind-purchase-invoice" style="padding:15px;margin-bottom:12px;border:1px solid #64748b55;border-radius:14px;background:var(--input-bg,#0b1626);">
+                <div class="ind-purchase-invoice-head">
+                  <div><strong style="font-size:16px">فاتورة مشتريات #${escapeHTML(String(invoiceId).slice(-8))}</strong>
+                    <div class="ind-purchase-invoice-meta"><span>المورد: ${escapeHTML(first.supplier || "غير محدد")}</span><span>التاريخ: ${escapeHTML(first.date || "—")}</span><span>${lines.length} صنف</span><span>الكمية: ${quantity.toLocaleString("ar-EG")}</span></div>
+                  </div>
+                  <div class="ind-purchase-invoice-total">${escapeHTML(money(total))}<small>المدفوع: ${escapeHTML(money(paid))}</small></div>
+                </div>
+                <button type="button" class="ind-purchase-details-toggle" aria-expanded="false" aria-controls="${cardId}">عرض تفاصيل الفاتورة <span>⌄</span></button>
+                <div id="${cardId}" class="ind-purchase-invoice-lines" hidden>
+                  ${lines.map(function (purchase) { return `
+                    <section class="ind-purchase-line">
+                      <div class="ind-purchase-line-title"><strong>${escapeHTML(purchase.product || "صنف بدون اسم")}</strong><b>${escapeHTML(money(purchase.total))}</b></div>
+                      <div class="ind-purchase-line-data">
+                        <span><b>نوع الصنف:</b> ${escapeHTML(categoryNames[purchase.category] || "مشتريات")}</span>
+                        <span><b>الكمية:</b> ${escapeHTML(purchase.quantity)}</span>
+                        <span><b>سعر القطعة:</b> ${escapeHTML(money(purchase.unitPrice))}</span>
+                        <span><b>إجمالي الصنف:</b> ${escapeHTML(money(purchase.total))}</span>
+                        <span><b>المدفوع:</b> ${escapeHTML(money(purchase.paid))}</span>
+                      </div>
+                      ${purchase.notes ? `<p class="ind-purchase-line-notes">ملاحظات: ${escapeHTML(purchase.notes)}</p>` : ""}
+                      <div class="ind-purchase-line-actions">
+                        <button type="button" data-purchase-action="edit" data-purchase-id="${escapeHTML(purchase.id)}">✏️ تعديل الصنف</button>
+                        <button type="button" data-purchase-action="delete" data-purchase-id="${escapeHTML(purchase.id)}">🗑️ حذف الصنف</button>
+                      </div>
+                    </section>`; }).join("")}
+                  <div class="ind-purchase-invoice-footer"><b>إجمالي الفاتورة: ${escapeHTML(money(total))}</b><b>المتبقي: ${escapeHTML(money(Math.max(0,total-paid)))}</b></div>
+                </div>
+              </article>`;
         }).join("");
+        purchasesList.querySelectorAll('.ind-purchase-details-toggle').forEach(function (button) {
+            button.addEventListener('click', function () {
+                const panel = document.getElementById(button.getAttribute('aria-controls'));
+                if (!panel) return;
+                const opening = panel.hidden;
+                panel.hidden = !opening;
+                button.setAttribute('aria-expanded', String(opening));
+                button.innerHTML = opening ? 'إخفاء تفاصيل الفاتورة <span>⌃</span>' : 'عرض تفاصيل الفاتورة <span>⌄</span>';
+            });
+        });
     }
 
     function clearForm() {
@@ -20501,10 +20400,16 @@ function savePurchases() {
             return;
         }
 
-        if (editingId) {
-            applyPurchaseDepartmentChange(oldRecord, record, invoiceId);
-        } else {
-            invoiceRecords.forEach(line => applyPurchaseDepartmentChange(null, line, invoiceId));
+        if (oldRecord && oldRecord.category === "phones" && record.category !== "phones") {
+            window.actPhoneInventoryRemovePurchase?.("independent", oldRecord);
+        }
+        if (record.category === "phones") {
+            window.actPhoneInventoryUpsertPurchase?.("independent", record, oldRecord);
+        }
+        if (!editingId) {
+            invoiceRecords.slice(1).filter(line => line.category === "phones").forEach(line => {
+                window.actPhoneInventoryUpsertPurchase?.("independent", line, null);
+            });
         }
 
         clearForm();
