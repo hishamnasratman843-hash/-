@@ -19956,10 +19956,10 @@ document.addEventListener("DOMContentLoaded", function () {
     function addPurchaseInvoiceItem() {
         if (!extraPurchaseItemsHost) return;
         const row = document.createElement("div");
-        row.className = "ind-purchase-extra-item";
+        row.className = "ind-purchase-extra-item sale-extra-item-row";
         row.dataset.purchaseItem = String(++purchaseItemSequence);
-        row.style.cssText = "display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;padding:14px;border:1px solid #64748b55;border-radius:12px;background:var(--input-bg,#0b1626);";
-        row.innerHTML = `<label>نوع الصنف<select data-extra-category><option value="phones">📱 تلفون</option><option value="accessories">🎧 إكسسوار</option><option value="parts">🔧 قطعة غيار</option></select></label><label>اسم الصنف<input data-extra-product type="text" placeholder="اسم المنتج" required></label><label>الكمية<input data-extra-quantity type="number" min="1" step="1" value="1" required></label><label>سعر القطعة<input data-extra-price type="number" min="0" step="0.01" value="0" required></label><div style="display:flex;align-items:end;"><button type="button" data-remove-extra style="padding:10px 14px;border:0;border-radius:9px;cursor:pointer;">حذف الصنف ✕</button></div>`;
+        
+        row.innerHTML = `<div class="sales-field"><label>نوع الصنف</label><select data-extra-category><option value="phones">📱 تلفون</option><option value="accessories">🎧 إكسسوار</option><option value="parts">🔧 قطعة غيار</option></select></div><div class="sales-field"><label>اسم الصنف</label><input data-extra-product type="text" placeholder="اسم المنتج" required></div><div class="sales-field"><label>الكمية</label><input data-extra-quantity type="number" min="1" step="1" value="1" required></div><div class="sales-field"><label>سعر القطعة</label><input data-extra-price type="number" min="0" step="0.01" value="0" required></div><button type="button" class="sale-remove-item" data-remove-extra>حذف الصنف ✕</button>`;
         extraPurchaseItemsHost.appendChild(row);
         row.querySelector("[data-remove-extra]").addEventListener("click", () => { row.remove(); updatePreview(); });
         row.addEventListener("input", updatePreview);
@@ -20114,6 +20114,89 @@ function savePurchases() {
             Math.random().toString(36).slice(2);
     }
 
+    function userScopedKey(type) {
+        try { return typeof getUserKey === "function" ? getUserKey(type) : `actPhoneManager_${type}_guest`; }
+        catch (_) { return `actPhoneManager_${type}_guest`; }
+    }
+
+    function readStoredRows(key) {
+        try { const value = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(value) ? value : []; }
+        catch (error) { console.warn("Purchase department read failed", key, error); return []; }
+    }
+
+    function writeStoredRows(key, rows) {
+        try {
+            const raw = JSON.stringify(rows);
+            localStorage.setItem(key, raw);
+            if (typeof saveUserDataToCloud === "function") saveUserDataToCloud(key, raw);
+            return true;
+        } catch (error) { console.error("Purchase department save failed", key, error); return false; }
+    }
+
+    function normalizePurchaseName(value) {
+        return String(value || "").trim().toLocaleLowerCase("ar").replace(/[أإآ]/g, "ا").replace(/\s+/g, " ");
+    }
+
+    // Route each invoice line into its own stock department while keeping the shared invoiceId.
+    function applyPurchaseDepartmentChange(oldLine, newLine, invoiceId) {
+        const oldCategory = oldLine?.category || "";
+        const newCategory = newLine?.category || "";
+        const oldName = oldLine?.product || "";
+        const newName = newLine?.product || "";
+        const oldQty = Number(oldLine?.quantity) || 0;
+        const newQty = Number(newLine?.quantity) || 0;
+
+        if (oldCategory === "phones" && (newCategory !== "phones" || String(oldLine?.id) !== String(newLine?.id))) {
+            window.actPhoneInventoryRemovePurchase?.("independent", oldLine);
+        }
+        if (newCategory === "phones") {
+            window.actPhoneInventoryUpsertPurchase?.("independent", newLine, oldCategory === "phones" ? oldLine : null);
+        }
+
+        if (oldCategory === "accessories" && (newCategory !== "accessories" || normalizePurchaseName(oldName) !== normalizePurchaseName(newName))) {
+            const key = userScopedKey("accessories"), rows = readStoredRows(key), match = rows.find(x => normalizePurchaseName(x.name) === normalizePurchaseName(oldName));
+            if (match) match.quantity = Math.max(0, (Number(match.quantity) || 0) - oldQty);
+            if (!writeStoredRows(key, rows)) return false;
+        }
+        if (newCategory === "accessories") {
+            const key = userScopedKey("accessories"), rows = readStoredRows(key);
+            let item = rows.find(x => normalizePurchaseName(x.name) === normalizePurchaseName(newName));
+            const addedQty = oldCategory === "accessories" && normalizePurchaseName(oldName) === normalizePurchaseName(newName) ? newQty - oldQty : newQty;
+            if (!item && addedQty > 0) {
+                item = { id: "acc_purchase_" + makeId(), name: newName, code: "", quantity: 0, cost: Number(newLine.unitPrice) || 0, price: 0, createdAt: new Date().toISOString() };
+                rows.unshift(item);
+            }
+            if (item) {
+                item.quantity = Math.max(0, (Number(item.quantity) || 0) + addedQty);
+                item.cost = Number(newLine.unitPrice) || Number(item.cost) || 0;
+                item.updatedAt = new Date().toISOString();
+                item.lastPurchaseInvoiceId = invoiceId;
+            }
+            if (!writeStoredRows(key, rows)) return false;
+            const movementKey = userScopedKey("accessoryMovements"), movements = readStoredRows(movementKey);
+            if (addedQty !== 0) movements.unshift({ id: "accmove_" + makeId(), itemId: item?.id || "", name: newName, kind: addedQty > 0 ? "purchase" : "purchase_adjustment", quantity: Math.abs(addedQty), delta: addedQty, unitPrice: Number(newLine.unitPrice) || 0, total: Math.abs(addedQty) * (Number(newLine.unitPrice) || 0), invoiceId, date: new Date().toISOString() });
+            writeStoredRows(movementKey, movements);
+            window.dispatchEvent(new Event("act-accessories-data-updated"));
+        }
+
+        // Parts have no dedicated stock screen in this build; keep a separate, user-scoped parts stock ledger.
+        if (oldCategory === "parts" || newCategory === "parts") {
+            const key = userScopedKey("spareParts"), rows = readStoredRows(key);
+            if (oldCategory === "parts") {
+                const oldItem = rows.find(x => normalizePurchaseName(x.name) === normalizePurchaseName(oldName));
+                if (oldItem && (newCategory !== "parts" || normalizePurchaseName(oldName) !== normalizePurchaseName(newName))) oldItem.quantity = Math.max(0, (Number(oldItem.quantity) || 0) - oldQty);
+            }
+            if (newCategory === "parts") {
+                let item = rows.find(x => normalizePurchaseName(x.name) === normalizePurchaseName(newName));
+                const addedQty = oldCategory === "parts" && normalizePurchaseName(oldName) === normalizePurchaseName(newName) ? newQty - oldQty : newQty;
+                if (!item && addedQty > 0) { item = { id: "part_purchase_" + makeId(), name: newName, quantity: 0, cost: Number(newLine.unitPrice) || 0, createdAt: new Date().toISOString() }; rows.unshift(item); }
+                if (item) { item.quantity = Math.max(0, (Number(item.quantity) || 0) + addedQty); item.cost = Number(newLine.unitPrice) || Number(item.cost) || 0; item.lastPurchaseInvoiceId = invoiceId; item.updatedAt = new Date().toISOString(); }
+            }
+            if (!writeStoredRows(key, rows)) return false;
+        }
+        return true;
+    }
+
     function escapeHTML(value) {
         return String(value == null ? "" : value).replace(
             /[&<>"']/g,
@@ -20194,7 +20277,7 @@ function savePurchases() {
                             <div style="opacity:.85;margin-top:7px;display:grid;gap:5px;">
                                 <span><b>نوع الصنف:</b> ${escapeHTML(categoryNames[purchase.category] || "مشتريات")}</span>
                                 <span><b>اسم المورد:</b> ${escapeHTML(purchase.supplier || "غير محدد")}</span>
-                                ${purchase.invoiceId ? `<span><b>رقم الفاتورة:</b> ${escapeHTML(purchase.invoiceId.slice(-8))}</span>` : ""}
+                                ${purchase.invoiceId ? `<span><b>رقم الفاتورة المشتركة:</b> ${escapeHTML(purchase.invoiceId.slice(-8))} · <b>الصنف:</b> ${Number(purchase.invoiceLine)||1} من ${Number(purchase.invoiceLinesCount)||1}</span>` : ""}
                             </div>
                         </div>
 
@@ -20418,16 +20501,10 @@ function savePurchases() {
             return;
         }
 
-        if (oldRecord && oldRecord.category === "phones" && record.category !== "phones") {
-            window.actPhoneInventoryRemovePurchase?.("independent", oldRecord);
-        }
-        if (record.category === "phones") {
-            window.actPhoneInventoryUpsertPurchase?.("independent", record, oldRecord);
-        }
-        if (!editingId) {
-            invoiceRecords.slice(1).filter(line => line.category === "phones").forEach(line => {
-                window.actPhoneInventoryUpsertPurchase?.("independent", line, null);
-            });
+        if (editingId) {
+            applyPurchaseDepartmentChange(oldRecord, record, invoiceId);
+        } else {
+            invoiceRecords.forEach(line => applyPurchaseDepartmentChange(null, line, invoiceId));
         }
 
         clearForm();
