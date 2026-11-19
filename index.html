@@ -5,6 +5,40 @@
 
 <head>
     <script>
+/* Install ACT in-app alerts before any app module can call alert(). */
+(function () {
+  var toastTimer = null;
+  window.alert = function (message) {
+    function showToast() {
+      if (!document.body) return;
+      var toast = document.getElementById("act-mobile-toast");
+      if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "act-mobile-toast";
+        toast.setAttribute("role", "status");
+        toast.setAttribute("aria-live", "polite");
+        document.body.appendChild(toast);
+      }
+      toast.textContent = String(message == null ? "" : message);
+      toast.classList.add("show");
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(function () { toast.classList.remove("show"); }, 3600);
+    }
+    if (document.body) showToast();
+    else document.addEventListener("DOMContentLoaded", showToast, { once: true });
+  };
+  /* Hide the browser's "<site> says" box for plain save confirmations.
+     Only messages that are about SAVING (and not delete / sign-out / restore / choices) are auto-accepted.
+     Delete and other risky questions keep their safety prompt. */
+  var nativeConfirm = window.confirm ? window.confirm.bind(window) : null;
+  window.confirm = function (message) {
+    var text = String(message == null ? "" : message);
+    var isSave = /حفظ|save/i.test(text);
+    var isRisky = /حذف|مسح|delete|remove|erase|الخروج|sign out|استعادة|restore|شغال|نقل/i.test(text);
+    if (isSave && !isRisky) return true;
+    return nativeConfirm ? nativeConfirm(message) : true;
+  };
+})();
 /* apply saved theme + language BEFORE first paint (no flash, no wrong colours) */
 (function(){try{var t=localStorage.getItem("actPhoneManager_theme")==="light"?"light":"dark";var l=localStorage.getItem("actPhoneManager_language")==="en"?"en":"ar";var d=document.documentElement;d.setAttribute("data-theme",t);d.lang=l;d.dir=l==="ar"?"rtl":"ltr";var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content",t==="light"?"#ffffff":"#000000");}catch(e){}})();
 </script>
@@ -41,7 +75,7 @@
 
     <link
         rel="stylesheet"
-        href="style.css"
+        href="style.css?v=20261119-sales-premium-2"
     >
 
 
@@ -2927,6 +2961,12 @@
             class="previous-days-list"
         ></div>
 
+        <div class="day-close-comparison-panel">
+            <h3>📊 مقارنة حركة الأيام</h3>
+            <p>قارن إجمالي المبيعات والمشتريات والإيداعات والسحوبات بين يومين محفوظين.</p>
+            <div id="day-close-comparison"></div>
+        </div>
+
     </div>
 
 </section>
@@ -3349,6 +3389,8 @@
     </div>
 
 
+    <div id="sales-home-stats"></div>
+
     <!-- SALES MAIN CARDS -->
 
     <div class="independent-sales-grid">
@@ -3393,6 +3435,17 @@
                 عرض عمليات البيع السابقة
             </small>
 
+        </button>
+
+
+        <button
+            class="independent-sales-card"
+            type="button"
+            data-sales-view="customers"
+        >
+            <span class="independent-sales-icon">👥</span>
+            <strong>حسابات العملاء</strong>
+            <small>مين أخد إيه وعليه كام</small>
         </button>
 
 
@@ -3812,6 +3865,10 @@
 <!-- =================================================
      SALES HISTORY
 ================================================== -->
+
+<div id="sales-view-customers" class="independent-sales-view" style="display:none;">
+    <div id="sales-customers-root"></div>
+</div>
 
 <div
     id="sales-view-history"
@@ -6957,7 +7014,7 @@
 <script type="module" src="./fix-activation.js"></script>
 <script src="./i18n-en.js"></script>
 <script src="./pwa-install.js"></script>
-<script type="module" src="./script.js?v=20261118-search-invoice-3"></script>
+<script type="module" src="./script.js?v=20261119-home-exit-device-default-5"></script>
 <script src="./act-workspace-persistence.js"></script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
@@ -7008,4 +7065,8 @@
 .purchase-card .purchase-device-photo{display:block;max-width:180px;max-height:180px;object-fit:contain;border-radius:12px;margin:10px auto;}
 .ind-purchase-record b{font-weight:700;}
 @media(max-width:600px){.purchase-card .device-actions{width:100%;}.purchase-card .device-actions button{flex:1 1 130px;}}
+
+.day-close-comparison-panel{margin:18px 0;padding:18px;border:1px solid rgba(140,160,190,.22);border-radius:16px;background:rgba(120,140,170,.06)}
+.day-close-comparison-panel h3{margin:0 0 6px}.day-close-comparison-panel p{opacity:.72;margin:0 0 14px;font-size:13px}
+.day-close-compare-controls{display:flex;flex-wrap:wrap;align-items:end;gap:10px}.day-close-compare-controls label{display:grid;gap:6px;flex:1;min-width:160px;font-size:13px}.day-close-compare-controls select,.day-close-compare-controls button{min-height:40px;border-radius:9px;padding:8px 11px;border:1px solid rgba(140,160,190,.3);background:var(--card-bg,rgba(255,255,255,.08));color:inherit}.day-close-compare-controls button{cursor:pointer}.day-close-compare-table{overflow-x:auto;margin-top:14px}.day-close-compare-table table{width:100%;border-collapse:collapse;min-width:480px}.day-close-compare-table th,.day-close-compare-table td{padding:9px;border-bottom:1px solid rgba(140,160,190,.2);text-align:right;font-size:13px}
 </style>

@@ -1775,6 +1775,8 @@ if (loginEmail) {
 
 function showLoginPage() {
 
+    actAuthSettled();
+
     currentUser = null;
 
     const bottomNavigation =
@@ -2094,8 +2096,12 @@ async function actPrepareSubscriptionReceipt(file) {
     return dataUrl;
 }
 
+let actAuthSettledResolve = function () {};
+const actAuthSettledPromise = new Promise(resolve => { actAuthSettledResolve = resolve; });
+function actAuthSettled() { try { actAuthSettledResolve(); } catch (_) {} }
+
 async function actVerifySubscriptionAndDevice(user) {
-    if (!navigator.onLine) throw new Error("يلزم الاتصال بالإنترنت عند فتح ACT للتحقق من الاشتراك والأجهزة.");
+    if (!navigator.onLine) { const offlineError = new Error("يلزم الاتصال بالإنترنت عند فتح ACT للتحقق من الاشتراك والأجهزة."); offlineError.offline = true; throw offlineError; }
     const result = await actControlRequest(user, "/api/bootstrap", {
         deviceId: actGetInstallationId(),
         deviceLabel: (navigator.platform || "جهاز") + " · " + (navigator.userAgent.includes("Mobile") ? "موبايل" : "متصفح"),
@@ -2105,11 +2111,15 @@ async function actVerifySubscriptionAndDevice(user) {
     });
     if (!result.allowed) {
         if (result.status === "expired") {
+            actAuthSettled();
             await actRenderSubscriptionScreen(user, result);
             return { blocked: true, status: "expired" };
         }
-        throw new Error(result.reason || "هذا الحساب غير مسموح له بالدخول حاليًا.");
+        const deniedError = new Error(result.reason || "هذا الحساب غير مسموح له بالدخول حاليًا.");
+        deniedError.denied = true;
+        throw deniedError;
     }
+    try { localStorage.setItem("actGateVerifiedUid", String(user.uid)); } catch (_) {}
     const subscriptionScreen = document.getElementById("act-subscription-screen");
     if (subscriptionScreen) subscriptionScreen.hidden = true;
     window.ACT_CONTROL_SESSION = result;
@@ -2268,8 +2278,12 @@ async function showActFirstWelcome(appReady) {
     layer.remove();
 }
 
-// شاشة الترحيب تظهر أول ما يُفتح البرنامج (قبل تسجيل الدخول) في كل مرة.
-showActFirstWelcome(Promise.resolve());
+// شاشة الترحيب تظهر في كل فتح للبرنامج، وتفضل لحد ما يتحدد الشاشة التالية (الرئيسية أو تسجيل الدخول)
+// عشان شاشة التسجيل ماتلمحش لحظة وتختفي. فيه حد أقصى للانتظار عشان ماتعلقش أبدًا.
+showActFirstWelcome(Promise.race([
+    actAuthSettledPromise,
+    new Promise(resolve => setTimeout(resolve, 20000))
+]));
 
 // ======================================================
 // مراقبة حالة تسجيل الدخول
@@ -2299,6 +2313,7 @@ onAuthStateChanged(
             const isActOwnerAccount = String(user.email || "").trim().toLowerCase() === "hishamnasratman843@gmail.com";
             if (!isActOwnerAccount && localStorage.getItem("actFixActivatedDevice") !== localStorage.getItem("actFixDeviceId")) {
                 // الترتيب الجديد: الترحيب ← تسجيل الدخول ← FIX ← البرنامج
+                actAuthSettled();
                 const fixPassed = typeof window.actFixGate === "function" ? await window.actFixGate() : false;
                 if (!fixPassed) {
                     await signOut(auth).catch(() => {});
@@ -2338,7 +2353,8 @@ if (isEmailAccount) {
             );
 
             // السماح بالعمل دون إنترنت للحساب المؤكد سابقًا فقط
-            if (navigator.onLine || !wasEmailVerified) {
+            // مانطلعش المستخدم من حسابه بسبب مشكلة اتصال مؤقتة: الحساب المؤكد قبل كده يكمل شغل عادي.
+            if (!wasEmailVerified) {
 
                 showLoginPage();
 
@@ -2366,15 +2382,24 @@ try {
     const gateResult = await actVerifySubscriptionAndDevice(user);
     if (gateResult?.blocked) return;
 } catch (gateError) {
-    console.warn("ACT access gate blocked:", gateError);
-    showLoginPage();
-    alert(gateError.message || "تعذر التحقق من صلاحية الحساب.");
-    await signOut(auth).catch(() => {});
-    return;
+    const explicitlyDenied = !!(gateError && (gateError.denied || gateError.status === 401 || gateError.status === 403));
+    let verifiedBefore = false;
+    try { verifiedBefore = localStorage.getItem("actGateVerifiedUid") === String(user.uid); } catch (_) {}
+    if (!explicitlyDenied && verifiedBefore) {
+        // الجهاز اتحقق منه قبل كده ودلوقتي مفيش اتصال/الخدمة مش متاحة: المستخدم يكمل من غير ما يسجل تاني.
+        console.warn("ACT access check skipped (temporary):", gateError && gateError.message);
+    } else {
+        console.warn("ACT access gate blocked:", gateError);
+        showLoginPage();
+        alert(gateError.message || "تعذر التحقق من صلاحية الحساب.");
+        await signOut(auth).catch(() => {});
+        return;
+    }
 }
 
 // ابدأ تحميل بيانات المستخدم خلف شاشة الترحيب، ولا تُخفِ الشاشة حتى يكتمل التحميل.
 await openAppForUser(user);
+            actAuthSettled();
 
         } catch (error) {
 
@@ -3961,6 +3986,16 @@ function createDayCloseSnapshot(dateKey) {
 
 
     // ==================================================
+    // 🎧 حركة مخزون الإكسسوارات
+    // ==================================================
+    let dayAccessoryMovements = [];
+    try {
+        const movementKey = getUserKey("accessoryMovements");
+        const movementRows = JSON.parse(localStorage.getItem(movementKey) || "[]");
+        if (Array.isArray(movementRows)) dayAccessoryMovements = movementRows.filter(item => String(item.date || item.createdAt || "").slice(0, 10) === dateKey);
+    } catch (error) { console.warn("Day close accessory movement error", error); }
+
+    // ==================================================
     // 👨‍💼 الموظفين
     // ==================================================
 
@@ -4122,7 +4157,7 @@ function createDayCloseSnapshot(dateKey) {
                 return (
                     total +
                     Number(
-                        purchase.price ||
+                        purchase.total || purchase.price ||
                         0
                     )
                 );
@@ -4265,6 +4300,9 @@ function createDayCloseSnapshot(dateKey) {
 
             wallet:
                 dayWalletTransactions,
+
+            accessoryMovements:
+                dayAccessoryMovements,
 
             employees:
                 employeesSnapshot,
@@ -5019,6 +5057,8 @@ function renderPreviousDays() {
             }
         );
 
+    renderDayCloseComparison();
+
 }
 
 
@@ -5026,54 +5066,47 @@ function renderPreviousDays() {
 // تفاصيل يوم محفوظ
 // ======================================================
 
-function openDayCloseDetails(
-    dateKey
-) {
+function openDayCloseDetails(dateKey) {
+    const archive = loadDayCloseArchives().find(item => item && item.date === dateKey);
+    if (!archive) return;
+    const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"}[ch]));
+    const summary = archive.summary || {};
+    const groups = [
+        ["المبيعات", archive.data?.sales || []],
+        ["المشتريات", [...(archive.data?.purchases || []), ...(archive.data?.independentPurchases || [])]],
+        ["حركة الأجهزة", archive.data?.devices || []],
+        ["حركة المحفظة", archive.data?.wallet || []],
+        ["حركة الإكسسوارات", archive.data?.accessoryMovements || []]
+    ];
+    const rows = groups.map(([title, items]) => `<section><h2>${title} (${items.length})</h2>${items.length ? `<table><thead><tr><th>البيان</th><th>القيمة / الكمية</th></tr></thead><tbody>${items.map(item => {
+        const name = item.productName || item.phoneName || item.product || item.name || item.service || item.operationName || item.type || "عملية";
+        const value = item.total ?? item.price ?? item.amount ?? item.quantity ?? "—";
+        return `<tr><td>${esc(name)}</td><td>${esc(value)}</td></tr>`;
+    }).join("")}</tbody></table>` : `<p>لا توجد عمليات مسجلة.</p>`}</section>`).join("");
+    const popup = window.open("", "act-day-close-report", "width=900,height=750");
+    if (!popup) { alert("اسمح بفتح النوافذ المنبثقة لعرض وطباعة التقرير."); return; }
+    popup.document.open();
+    popup.document.write(`<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><title>تقرير إقفال ${esc(dateKey)}</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#182230}h1{margin:0 0 8px}.meta{color:#667085;margin-bottom:20px}.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.tile{border:1px solid #ddd;border-radius:10px;padding:12px}.tile b{display:block;margin-bottom:5px}section{margin-top:22px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:8px;text-align:right}button{padding:10px 18px;margin:14px 0;cursor:pointer}@media print{button{display:none}}</style><h1>تقرير إقفال اليوم</h1><div class="meta">${esc(formatDayCloseDate(archive.date))} · تم الحفظ: ${esc(archive.closedAt || "—")}</div><div class="summary"><div class="tile"><b>عدد المبيعات</b>${Number(summary.salesCount)||0}</div><div class="tile"><b>إجمالي المبيعات</b>${esc(formatMoney(summary.salesTotal||0))}</div><div class="tile"><b>عدد المشتريات</b>${Number(summary.purchasesCount)||0}</div><div class="tile"><b>إجمالي المشتريات</b>${esc(formatMoney(summary.purchasesTotal||0))}</div><div class="tile"><b>إيداع المحفظة</b>${esc(formatMoney(summary.walletDepositTotal||0))}</div><div class="tile"><b>سحب المحفظة</b>${esc(formatMoney(summary.walletWithdrawTotal||0))}</div><div class="tile"><b>الأجهزة</b>${Number(summary.devicesCount)||0}</div><div class="tile"><b>الموظفون</b>${Number(summary.employeesCount)||0}</div></div><button onclick="window.print()">طباعة التقرير</button>${rows}</html>`);
+    popup.document.close();
+}
 
-    const archives =
-        loadDayCloseArchives();
-
-
-    const archive =
-        archives.find(
-            function (item) {
-
-                return (
-                    item.date ===
-                    dateKey
-                );
-
-            }
-        );
-
-
-    if (!archive) {
-        return;
-    }
-
-
-    let message =
-        formatDayCloseDate(
-            archive.date
-        );
-
-
-    message +=
-        "\n\nعدد العمليات: " +
-        archive.operationsCount;
-
-
-    message +=
-        "\nإجمالي قيمة العمليات: " +
-        formatMoney(
-            archive.totalAmount
-        );
-
-
-    alert(
-        message
-    );
-
+function renderDayCloseComparison() {
+    const container = document.getElementById("day-close-comparison");
+    if (!container) return;
+    const archives = loadDayCloseArchives().slice().sort((a,b)=>b.date.localeCompare(a.date));
+    if (archives.length < 2) { container.innerHTML = `<small>ستظهر المقارنة بعد حفظ إقفال يومين على الأقل.</small>`; return; }
+    const options = archives.map(a => `<option value="${a.date}">${formatDayCloseDate(a.date)}</option>`).join("");
+    container.innerHTML = `<div class="day-close-compare-controls"><label>اليوم الأول <select id="day-close-compare-a">${options}</select></label><label>اليوم الثاني <select id="day-close-compare-b">${options}</select></label><button type="button" id="day-close-compare-run">مقارنة اليومين</button></div><div id="day-close-compare-result"></div>`;
+    const a = container.querySelector("#day-close-compare-a"), b = container.querySelector("#day-close-compare-b");
+    if (b && archives[1]) b.value = archives[1].date;
+    container.querySelector("#day-close-compare-run")?.addEventListener("click", () => {
+        const first = archives.find(x=>x.date===a.value), second = archives.find(x=>x.date===b.value);
+        const target = container.querySelector("#day-close-compare-result");
+        if (!first || !second || first.date === second.date) { target.textContent = "اختر يومين مختلفين للمقارنة."; return; }
+        const x=first.summary||{}, y=second.summary||{};
+        const rows=[["المبيعات",x.salesTotal,y.salesTotal],["المشتريات",x.purchasesTotal,y.purchasesTotal],["عدد عمليات البيع",x.salesCount,y.salesCount],["عدد عمليات الشراء",x.purchasesCount,y.purchasesCount],["إيداع المحفظة",x.walletDepositTotal,y.walletDepositTotal],["سحب المحفظة",x.walletWithdrawTotal,y.walletWithdrawTotal]];
+        target.innerHTML=`<div class="day-close-compare-table"><h4>${formatDayCloseDate(first.date)} مقابل ${formatDayCloseDate(second.date)}</h4><table><thead><tr><th>المؤشر</th><th>اليوم الأول</th><th>اليوم الثاني</th><th>الفرق</th></tr></thead><tbody>${rows.map(([label,v1,v2])=>`<tr><td>${label}</td><td>${formatMoney(v1||0)}</td><td>${formatMoney(v2||0)}</td><td>${formatMoney((Number(v2)||0)-(Number(v1)||0))}</td></tr>`).join("")}</tbody></table></div>`;
+    });
 }
 
 
@@ -5233,11 +5266,12 @@ function showSalesArea() {
     formSection =
         SECTIONS.SALE;
 
-    closeMaintenanceView();
+    // Each preparation step is isolated: one failing helper must never stop the device data from rendering.
+    try { closeMaintenanceView(); } catch (error) { console.warn("closeMaintenanceView:", error); }
 
-    hideEmployeeViews();
+    try { hideEmployeeViews(); } catch (error) { console.warn("hideEmployeeViews:", error); }
 
-    hideSaleSearch();
+    try { hideSaleSearch(); } catch (error) { console.warn("hideSaleSearch:", error); }
 
 
     // ==========================================
@@ -5251,7 +5285,21 @@ function showSalesArea() {
     }
 
 
-    renderSaleDevices();
+    // Open the device inventory directly on the phone-sales data view.
+    // Do not rely on a later click listener: navigation is handled in capture phase.
+    const defaultDeviceSaleTab = document.getElementById("device-sale-tab");
+    const defaultDevicePurchaseTab = document.getElementById("device-purchase-tab");
+    const phoneSaleSection = document.getElementById("phone-sale-section");
+    const phonePurchasesSection = document.getElementById("phone-purchases-section");
+    const phonePurchaseForm = document.getElementById("phone-purchase-form");
+    if (defaultDeviceSaleTab) defaultDeviceSaleTab.classList.add("active");
+    if (defaultDevicePurchaseTab) defaultDevicePurchaseTab.classList.remove("active");
+    if (phoneSaleSection) phoneSaleSection.style.display = "block";
+    if (phonePurchasesSection) phonePurchasesSection.style.display = "none";
+    if (phonePurchaseForm) phonePurchaseForm.style.display = "none";
+    try {
+        if (typeof renderSaleDevices === "function") renderSaleDevices();
+    } catch (error) { console.error("renderSaleDevices:", error); }
 }
 
 // ====================================================== 
@@ -11327,9 +11375,15 @@ if (navHome) {
                 showSalesArea();
             }
 
+            // Open the phone-sales data immediately (same as pressing the "بيع التلفونات" tab).
+            try {
+                const saleTabButton = document.getElementById("device-sale-tab");
+                if (saleTabButton) saleTabButton.click();
+            } catch (error) { console.warn("device-sale-tab:", error); }
+
             window.scrollTo({
                 top: 0,
-                behavior: "smooth"
+                behavior: "auto"
             });
 
         }, true);
@@ -13383,29 +13437,48 @@ function saveSalesData() {
                 if (wantedSerial) return String(record.serialNumber || record.serial || "").trim() === wantedSerial;
                 return String(record.phoneName || record.productName || record.name || "").trim().toLocaleLowerCase("ar") === wantedName;
             }).slice(0, item.quantity);
+            if (matching.length && matching.length !== item.quantity) {
+                alert(`الجهاز ${item.name} موجود في قسم الأجهزة بعدد ${matching.length} فقط. راجع الكمية أو أضف كل جهاز إلى قسم بيع الأجهزة قبل إصدار الفاتورة.`);
+                return;
+            }
             item.deviceRecords = matching.map(record => ({ ...record }));
         }
 
+        // Validate and consume every linked stock item before saving the invoice.
+        // A missing item is an error (not permission to create an untracked sale).
         const consumed = [];
+        const rollbackConsumedStock = () => consumed.slice().reverse().forEach(entry => {
+            if (entry.type === "phone") window.actPhoneInventoryRestoreSale?.(entry.name, entry.serial, entry.quantity || 1);
+            if (entry.type === "accessory") window.actAccessoryRestoreSale?.(entry.name, entry.quantity || 1);
+        });
         for (const item of sale.items) {
-            let result = { matched: false, ok: true };
-            // Existing device-sale records have already reduced phone stock.
-            const unitsToConsume = item.type === "accessory" ? 1 : (item.type === "phone" && item.deviceRecords?.length ? 0 : item.quantity);
-            for (let unit = 0; unit < unitsToConsume; unit++) {
-                if (item.type === "phone" && window.actPhoneInventoryConsumeSale) {
-                    result = window.actPhoneInventoryConsumeSale(item.name, item.serial);
-                } else if (item.type === "accessory" && window.actAccessoryConsumeSale) {
-                    result = window.actAccessoryConsumeSale(item.name, item.quantity);
+            if (item.type !== "phone" && item.type !== "accessory") continue;
+            // Device cards in Devices > Sale already consumed their purchase stock.
+            if (item.type === "phone" && item.deviceRecords?.length === item.quantity) continue;
+            if (item.type === "phone") {
+                for (let unit = 0; unit < item.quantity; unit++) {
+                    const result = window.actPhoneInventoryConsumeSale
+                        ? window.actPhoneInventoryConsumeSale(item.name, item.serial)
+                        : { matched: false, ok: false };
+                    if (!result.matched || !result.ok) {
+                        rollbackConsumedStock();
+                        alert(`بيانات الجهاز «${item.name}» غير موجودة أو غير متاحة في مخزون الأجهزة. أضفه أولًا إلى قسم بيع الأجهزة.`);
+                        return;
+                    }
+                    consumed.push({ type: "phone", name: item.name, serial: item.serial, quantity: 1 });
                 }
-                if (result.matched && !result.ok) {
-                    consumed.slice().reverse().forEach(entry => {
-                        if (entry.type === "phone") window.actPhoneInventoryRestoreSale?.(entry.name, entry.serial, 1);
-                        if (entry.type === "accessory") window.actAccessoryRestoreSale?.(entry.name, entry.quantity || 1);
-                    });
-                    alert(item.type === "phone" ? "الجهاز أو السيريال غير متاح في مخزون الأجهزة." : "كمية الإكسسوار غير متاحة في المخزون.");
+            } else {
+                const result = window.actAccessoryConsumeSale
+                    ? window.actAccessoryConsumeSale(item.name, item.quantity)
+                    : { matched: false, ok: false };
+                if (!result.matched || !result.ok) {
+                    rollbackConsumedStock();
+                    alert(result.matched
+                        ? `الصنف «${item.name}» موجود لكن الكمية المتاحة أقل من ${item.quantity}.`
+                        : `الصنف «${item.name}» غير موجود في قسم الإكسسوارات. أضفه أولًا إلى المخزون.`);
                     return;
                 }
-                if (result.matched) consumed.push({ type: item.type, name: item.name, serial: item.serial, quantity: item.type === "accessory" ? item.quantity : 1 });
+                consumed.push({ type: "accessory", name: item.name, quantity: item.quantity });
             }
         }
 
@@ -14023,18 +14096,18 @@ function saveSalesData() {
         let consumedUnits = 0;
         if (itemType === "accessory" && window.actAccessoryConsumeSale) {
             const stock = window.actAccessoryConsumeSale(name.trim(), quantity);
-            if (stock?.matched && !stock.ok) { alert("الكمية غير متاحة في مخزون الإكسسوارات."); return; }
-            trackedStock = !!stock?.matched;
+            if (!stock?.matched || !stock.ok) { alert(stock?.matched ? "الكمية غير متاحة في مخزون الإكسسوارات." : `الصنف «${name.trim()}» غير موجود في قسم الإكسسوارات.`); return; }
+            trackedStock = true;
             consumedUnits = trackedStock ? quantity : 0;
         } else if (itemType === "phone" && window.actPhoneInventoryConsumeSale) {
             for (let unit = 0; unit < quantity; unit++) {
                 const stock = window.actPhoneInventoryConsumeSale(name.trim(), "");
-                if (stock?.matched && !stock.ok) {
+                if (!stock?.matched || !stock.ok) {
                     if (consumedUnits) window.actPhoneInventoryRestoreSale?.(name.trim(), "", consumedUnits);
-                    alert("كمية الجهاز غير متاحة في المخزون؛ تم التراجع عن الخصم الجزئي.");
+                    alert(`الجهاز «${name.trim()}» غير موجود أو الكمية غير متاحة في قسم بيع الأجهزة؛ تم التراجع عن الخصم الجزئي.`);
                     return;
                 }
-                if (stock?.matched) { trackedStock = true; consumedUnits++; }
+                trackedStock = true; consumedUnits++;
             }
         }
 
@@ -14082,14 +14155,44 @@ function saveSalesData() {
     }
 
     function restoreSaleDeviceRecords(item, quantity, offset = 0) {
-        if (!Array.isArray(devices) || !Array.isArray(item.deviceRecords)) return;
+        if (!Array.isArray(devices)) return;
         item.returnedDeviceRecordIds = Array.isArray(item.returnedDeviceRecordIds) ? item.returnedDeviceRecordIds : [];
-        const eligible = item.deviceRecords.filter(record => !item.returnedDeviceRecordIds.includes(record.id)).slice(0, Math.max(0, quantity));
+        const wanted = Math.max(0, Number(quantity) || 0);
+        const records = Array.isArray(item.deviceRecords) ? item.deviceRecords : [];
+        const eligible = records.filter(record => !item.returnedDeviceRecordIds.includes(record.id)).slice(0, wanted);
+        let changed = false;
         eligible.forEach(record => {
             if (!devices.some(existing => existing.id === record.id)) devices.unshift({ ...record });
             item.returnedDeviceRecordIds.push(record.id);
+            changed = true;
         });
-        if (eligible.length) persistSalesLinkedDevices();
+        // The phone was sold straight from an invoice (never listed in phone sales): list it now.
+        const missing = Math.max(0, wanted - eligible.length);
+        const serial = String(item.serial || "").trim();
+        for (let n = 0; n < missing; n++) {
+            if (serial && devices.some(row => String(row.serialNumber || row.serial || "").trim() === serial && (row.section === "sale" || row.category === SECTIONS.SALE))) continue;
+            const unit = Number(item.unitPrice ?? item.price ?? 0) || 0;
+            const id = "device-return-" + Date.now() + "-" + n + "-" + Math.random().toString(36).slice(2, 6);
+            devices.unshift({
+                id,
+                phoneName: item.name || "",
+                serialNumber: serial,
+                serial: serial,
+                price: unit,
+                phonePrice: unit,
+                purchasePrice: 0,
+                boxIncluded: true,
+                notes: "مرتجع شغال من فاتورة بيع",
+                status: "البيع",
+                category: SECTIONS.SALE,
+                section: "sale",
+                date: new Date().toISOString().slice(0, 10),
+                createdAt: new Date().toISOString()
+            });
+            item.returnedDeviceRecordIds.push(id);
+            changed = true;
+        }
+        if (changed) persistSalesLinkedDevices();
     }
 
     function applySalesReturn(saleId, itemIndex, quantity, working = true) {
@@ -14103,10 +14206,7 @@ function saveSalesData() {
         const remaining = Math.max(0, Number(item.quantity || 1) - Number(item.returnedQuantity || 0));
         if (!Number.isInteger(quantity) || quantity < 1 || quantity > remaining) return false;
         const wasTracked = Array.isArray(sale.stockMovements) && sale.stockMovements.some(m => m.type === item.type && String(m.name || "") === String(item.name || "") && (item.type !== "phone" || !item.serial || !m.serial || String(m.serial) === String(item.serial)));
-        if (working && wasTracked && item.type === "phone") {
-            const restored = window.actPhoneInventoryRestoreSale?.(item.name, item.serial, quantity);
-            if (!restored || !restored.ok) return false;
-        }
+        // Working phones go back to Devices > "بيع التلفونات" only (see restoreSaleDeviceRecords), never to purchases stock.
         if (working && wasTracked && item.type === "accessory") {
             const restored = window.actAccessoryRestoreSale?.(item.name, quantity);
             if (!restored || !restored.ok) return false;
@@ -16156,8 +16256,25 @@ if (walletCancelOperation) {
         printHistory: 
             printSalesHistory,
         getAll: () => salesData.slice(),
-        returnFromInvoice: applySalesReturn 
- 
+        returnFromInvoice: applySalesReturn,
+        update: function (id, mutator) {
+            const sale = salesData.find(item => String(item.id) === String(id));
+            if (!sale || typeof mutator !== "function") return false;
+            mutator(sale);
+            sale.updatedAt = new Date().toISOString();
+            saveSalesData(); renderSalesHistory(); renderSalesReports();
+            return true;
+        },
+        returnItem: function (saleId, itemIndex, quantity, working) {
+            const sale = salesData.find(item => String(item.id) === String(saleId));
+            if (!sale) return false;
+            const ok = applySalesReturn(sale.id, itemIndex, quantity, working);
+            if (ok) {
+                const after = (Array.isArray(sale.items) ? sale.items : [])[Number(itemIndex)] || {};
+                window.actPhoneManagerReturns?.recordLinkedReturn?.({ saleId: sale.id, invoiceNumber: sale.invoiceNumber, itemIndex: Number(itemIndex), itemName: after.name || sale.productName || "", quantity, working, customer: sale.customerName || "", price: Number(after.unitPrice ?? after.price ?? 0) * quantity });
+            }
+            return ok;
+        }
     }; 
  
 })(); 
@@ -23656,3 +23773,544 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
   });
 })();
 
+
+/* =========================================================
+   MOBILE HOME MODULE EXIT FIX (v2)
+   Phone-sized screens only. Applies ONLY to sections opened from the four
+   ACT MODULES cards on the home screen (devices / maintenance / employees / sales).
+   Leaving such a section (any back/close button, or the phone's Back button)
+   always returns straight to the home screen - never to a blank screen.
+========================================================= */
+(function initMobileHomeModuleExit(){
+  'use strict';
+  const mobile = () => window.matchMedia && window.matchMedia('(max-width: 767px)').matches;
+  const CARD_SELECTOR = '#home-devices,#home-maintenance,#home-employees,#home-sales';
+  let openedFromHomeModule = false;
+  let userChoseMore = false;
+  let historyPushed = false;
+  let observer = null;
+
+  function forceHome(){
+    const home = document.getElementById('home-section');
+    const ids = [
+      'sales-area','customers-section','employees-section','wallet-section','account-section',
+      'independent-sales-section','independent-purchases-section','more-section',
+      'day-close-section','customer-management-section','safe-overview-section',
+      'settings-section','accessories-section','general-reports-section','previous-days-section',
+      'owner-console-section','customer-support-section'
+    ];
+    ids.forEach(id=>{const el=document.getElementById(id);if(el)el.style.setProperty('display','none','important');});
+    document.querySelectorAll('.sales-area,.act-extra-section').forEach(el=>el.style.setProperty('display','none','important'));
+    document.querySelectorAll('.independent-sales-view,.independent-purchases-view').forEach(el=>el.style.setProperty('display','none','important'));
+    if(home){ home.hidden = false; home.style.setProperty('display','block','important'); }
+    const navHome=document.getElementById('nav-home');
+    document.querySelectorAll('.bottom-nav-button').forEach(el=>el.classList.remove('active'));
+    if(navHome) navHome.classList.add('active');
+    openedFromHomeModule=false;
+    userChoseMore=false;
+    const back=document.getElementById('act-mobile-home-return');
+    if(back) back.hidden=true;
+    window.scrollTo({top:0,behavior:'auto'});
+    // let the workspace-persistence module save "home" as the current screen
+    try { window.dispatchEvent(new Event('pagehide')); } catch (_) {}
+  }
+
+  function ensureReturnButton(){
+    if(document.getElementById('act-mobile-home-return')) return;
+    const button=document.createElement('button');
+    button.id='act-mobile-home-return';
+    button.type='button';
+    button.textContent='← الرئيسية';
+    button.setAttribute('aria-label','العودة إلى الشاشة الرئيسية');
+    button.hidden=true;
+    button.addEventListener('click',function(){ leaveToHome(true); });
+    document.body.appendChild(button);
+  }
+
+  // Leave to home; if we pushed a history entry, consume it so Back keeps working normally afterwards.
+  function leaveToHome(consumeHistory){
+    forceHome();
+    if(consumeHistory && historyPushed){
+      historyPushed=false;
+      try { history.back(); } catch (_) {}
+    }
+  }
+
+  function isVisible(el){
+    if(!el) return false;
+    return window.getComputedStyle(el).display !== 'none';
+  }
+
+  // Any attempt to land on the "More" screen while inside a home module = an exit button was pressed.
+  function watchMoreScreen(){
+    if(observer) return;
+    const more=document.getElementById('more-section');
+    if(!more || typeof MutationObserver==='undefined') return;
+    observer=new MutationObserver(function(){
+      if(!mobile() || !openedFromHomeModule || userChoseMore) return;
+      if(isVisible(more)) leaveToHome(true);
+    });
+    observer.observe(more,{attributes:true,attributeFilter:['style','class','hidden']});
+  }
+
+  function markHomeModule(event){
+    const card=event.target.closest(CARD_SELECTOR);
+    if(!card || !mobile()) return;
+    openedFromHomeModule=true;
+    userChoseMore=false;
+    ensureReturnButton();
+    watchMoreScreen();
+    if(!historyPushed){
+      try { history.pushState({actHomeModule:true},''); historyPushed=true; } catch (_) {}
+    }
+    const back=document.getElementById('act-mobile-home-return');
+    if(back) back.hidden=false;
+    requestAnimationFrame(()=>{const b=document.getElementById('act-mobile-home-return');if(b && openedFromHomeModule)b.hidden=false;});
+  }
+
+  document.addEventListener('click',function(event){
+    if(!mobile()) return;
+    const target=event.target;
+    if(!target || !target.closest) return;
+
+    if(target.closest('#nav-home')){
+      openedFromHomeModule=false;
+      const b=document.getElementById('act-mobile-home-return');
+      if(b) b.hidden=true;
+      return;
+    }
+    // Choosing another main tab by hand ends the "opened from home card" mode.
+    if(target.closest('#nav-more,#nav-sales,#nav-purchases,#nav-devices,#nav-account')){
+      userChoseMore=true;
+      openedFromHomeModule=false;
+      const b=document.getElementById('act-mobile-home-return');
+      if(b) b.hidden=true;
+      return;
+    }
+    markHomeModule(event);
+    if(!openedFromHomeModule) return;
+
+    const exit=target.closest(
+      '[data-act-extra-back],[data-act-training-back],[data-account-back],'+
+      '.act-extra-back,.account-back-button,#day-close-back-button,.day-close-back,'+
+      '.maintenance-exit-button,#maintenance-exit-button,.wallet-close-button'
+    );
+    if(!exit) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    leaveToHome(true);
+  },true);
+
+  // The phone's own Back button / gesture: go to home instead of a blank screen or leaving the app.
+  window.addEventListener('popstate',function(){
+    if(!mobile()) return;
+    if(openedFromHomeModule){
+      historyPushed=false;
+      forceHome();
+    }
+  });
+
+  // Direct device view is set in showSalesArea; this is a safe startup fallback.
+  function setDeviceSaleDefault(){
+    const sale=document.getElementById('device-sale-tab');
+    const purchase=document.getElementById('device-purchase-tab');
+    const saleSection=document.getElementById('phone-sale-section');
+    const purchaseSection=document.getElementById('phone-purchases-section');
+    if(!sale || !saleSection) return;
+    sale.classList.add('active');
+    purchase?.classList.remove('active');
+    saleSection.style.display='block';
+    if(purchaseSection) purchaseSection.style.display='none';
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',setDeviceSaleDefault,{once:true});
+  else setDeviceSaleDefault();
+})();
+
+/* =========================================================
+   ACT SALES ACCOUNTS
+   Customer accounts + full invoice window (edit / payments / returns / log)
+   Built on top of window.actPhoneManagerSales. Stock is only touched by returns.
+========================================================= */
+(function actSalesAccounts(){
+  'use strict';
+  const API = () => window.actPhoneManagerSales;
+  const $ = id => document.getElementById(id);
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const fmt = v => (Math.round(num(v) * 100) / 100).toLocaleString('en-US');
+  const money = v => fmt(v) + ' ج';
+  const sales = () => { try { return API() ? API().getAll() : []; } catch (_) { return []; } };
+  const findSale = id => sales().find(s => String(s.id) === String(id));
+  const itemsOf = s => (Array.isArray(s.items) && s.items.length)
+    ? s.items
+    : [{ name: s.productName || 'صنف', serial: s.serial || '', quantity: 1, unitPrice: num(s.price || s.total), returnedQuantity: num(s.returnedQuantity) }];
+  const unitOf = it => num(it.unitPrice != null ? it.unitPrice : it.price);
+  const fmtDate = d => { try { const x = new Date(d); if (isNaN(x)) return ''; return x.toLocaleString('en-GB', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); } catch (_) { return ''; } };
+  const dayOf = d => { try { const x = new Date(d); return x.getFullYear() + '-' + (x.getMonth()+1) + '-' + x.getDate(); } catch (_) { return ''; } };
+  const keyOf = s => { const p = String(s.customerPhone || '').trim(); const n = String(s.customerName || '').trim(); return p ? 'p:' + p : (n ? 'n:' + n.toLowerCase() : 'x:none'); };
+  const returnedValue = s => itemsOf(s).reduce((t, it) => t + num(it.returnedQuantity) * unitOf(it), 0);
+  const statusOf = s => {
+    if (s.returned) return { t: 'مرتجع كامل', c: 'gray' };
+    if (num(s.due) > 0) return { t: num(s.paid) > 0 ? 'آجل جزئي' : 'آجل', c: 'warn' };
+    return { t: 'مدفوعة', c: 'ok' };
+  };
+  const hasReturn = s => itemsOf(s).some(it => num(it.returnedQuantity) > 0);
+
+  /* ---------- home stats ---------- */
+  function renderHomeStats(){
+    const box = $('sales-home-stats'); if (!box) return;
+    const all = sales(); const today = dayOf(new Date());
+    const todayTotal = all.filter(s => dayOf(s.date || s.createdAt) === today).reduce((t, s) => t + num(s.total), 0);
+    const due = all.reduce((t, s) => t + num(s.due), 0);
+    const debtors = new Set(all.filter(s => num(s.due) > 0).map(keyOf)).size;
+    box.innerHTML =
+      '<div class="sa-stat sa-stat-blue"><span>مبيعات اليوم</span><strong>' + money(todayTotal) + '</strong></div>' +
+      '<div class="sa-stat sa-stat-red"><span>متبقي عند العملاء</span><strong>' + money(due) + '</strong></div>' +
+      '<div class="sa-stat sa-stat-teal"><span>عملاء عليهم مبالغ</span><strong>' + debtors + '</strong></div>';
+  }
+
+  /* ---------- customers view ---------- */
+  let search = '';
+  let openKey = '';
+  function groups(){
+    const map = new Map();
+    sales().forEach(s => {
+      const k = keyOf(s);
+      if (!map.has(k)) map.set(k, { key: k, name: '', phone: '', sales: [] });
+      const g = map.get(k);
+      if (!g.name && s.customerName) g.name = String(s.customerName).trim();
+      if (!g.phone && s.customerPhone) g.phone = String(s.customerPhone).trim();
+      g.sales.push(s);
+    });
+    const list = [...map.values()].map(g => {
+      g.sales.sort((a, b) => String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || '')));
+      g.total = g.sales.reduce((t, s) => t + num(s.total), 0);
+      g.paid = g.sales.reduce((t, s) => t + num(s.paid), 0);
+      g.due = g.sales.reduce((t, s) => t + num(s.due), 0);
+      g.returned = g.sales.reduce((t, s) => t + returnedValue(s), 0);
+      g.pieces = g.sales.reduce((t, s) => t + itemsOf(s).reduce((x, it) => x + Math.max(0, num(it.quantity || 1) - num(it.returnedQuantity)), 0), 0);
+      if (!g.name) g.name = g.key === 'x:none' ? 'بدون اسم عميل' : (g.phone || 'عميل');
+      return g;
+    });
+    list.sort((a, b) => (b.due - a.due) || (b.total - a.total));
+    return list;
+  }
+  function takenItems(g){
+    const map = new Map();
+    g.sales.forEach(s => itemsOf(s).forEach(it => {
+      const k = String(it.name || '') + '|' + String(it.serial || '');
+      if (!map.has(k)) map.set(k, { name: it.name || 'صنف', serial: it.serial || '', qty: 0, ret: 0, value: 0 });
+      const r = map.get(k);
+      r.qty += num(it.quantity || 1); r.ret += num(it.returnedQuantity);
+      r.value += (num(it.quantity || 1) - num(it.returnedQuantity)) * unitOf(it);
+    }));
+    return [...map.values()];
+  }
+  function renderCustomers(){
+    const root = $('sales-customers-root'); if (!root) return;
+    const all = groups();
+    const q = search.trim().toLowerCase();
+    const list = q ? all.filter(g => (g.name + ' ' + g.phone).toLowerCase().includes(q)) : all;
+    const sum = (f) => all.reduce((t, g) => t + g[f], 0);
+    let html =
+      '<div class="sa-hero"><div><span>ACT CUSTOMER ACCOUNTS</span><h3>حسابات العملاء</h3><p>اعرف كل عميل أخد إيه، وعليه كام، وافتح أي فاتورة وعدّلها من جوا</p></div><div class="sa-hero-icon">👥</div></div>' +
+      '<div class="sa-stats">' +
+        '<div class="sa-stat sa-stat-blue"><span>عدد العملاء</span><strong>' + all.length + '</strong></div>' +
+        '<div class="sa-stat sa-stat-teal"><span>إجمالي الفواتير</span><strong>' + money(sum('total')) + '</strong></div>' +
+        '<div class="sa-stat sa-stat-red"><span>إجمالي المتبقي</span><strong>' + money(sum('due')) + '</strong></div>' +
+      '</div>' +
+      '<div class="sa-search"><span>🔎</span><input type="search" id="sa-customer-search" placeholder="ابحث باسم العميل أو رقمه" value="' + esc(search) + '"></div>';
+    if (!list.length) {
+      html += '<div class="sa-empty">لا يوجد عملاء مطابقين. العملاء بيظهروا هنا تلقائيًا من الفواتير.</div>';
+    }
+    list.forEach(g => {
+      const open = g.key === openKey;
+      const initials = String(g.name).trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('') || '؟';
+      html += '<article class="sa-customer' + (open ? ' is-open' : '') + (g.due > 0 ? ' has-due' : '') + '">' +
+        '<button type="button" class="sa-customer-head" data-sa-toggle="' + esc(g.key) + '">' +
+          '<span class="sa-avatar">' + esc(initials) + '</span>' +
+          '<span class="sa-customer-main"><strong>' + esc(g.name) + '</strong><small>' + esc(g.phone || 'بدون رقم') + ' · ' + g.sales.length + ' فاتورة · ' + g.pieces + ' قطعة</small></span>' +
+          '<span class="sa-customer-money"><b>' + money(g.total) + '</b>' + (g.due > 0 ? '<em>عليه ' + money(g.due) + '</em>' : '<i>مسدد</i>') + '</span>' +
+        '</button>';
+      if (open) {
+        html += '<div class="sa-customer-body">' +
+          '<div class="sa-statement-row"><h4>كل اللي أخده</h4><button type="button" class="sa-btn" data-sa-statement="' + esc(g.key) + '">🖨️ كشف حساب</button></div><div class="sa-taken">' +
+          takenItems(g).map(r => '<div class="sa-taken-row"><span>' + esc(r.name) + (r.serial ? ' <small>' + esc(r.serial) + '</small>' : '') + '</span><span>' + (r.qty - r.ret) + (r.ret ? ' <small class="sa-ret">(مرتجع ' + r.ret + ')</small>' : '') + '</span><span>' + money(r.value) + '</span></div>').join('') +
+          '</div><h4>فواتيره</h4>' +
+          g.sales.map(s => { const st = statusOf(s); return '<button type="button" class="sa-inv-row" data-sa-open="' + esc(s.id) + '">' +
+            '<span class="sa-inv-no">#' + esc(s.invoiceNumber) + '</span>' +
+            '<span class="sa-inv-mid"><small>' + esc(fmtDate(s.date || s.createdAt)) + '</small><span>' + esc(itemsOf(s).map(i => (i.name || '') + ' × ' + (i.quantity || 1)).join('، ')) + '</span></span>' +
+            '<span class="sa-inv-end"><b>' + money(s.total) + '</b><span class="sa-pill sa-pill-' + st.c + '">' + st.t + '</span>' + (hasReturn(s) && !s.returned ? '<span class="sa-pill sa-pill-gray">فيه مرتجع</span>' : '') + '</span></button>'; }).join('') +
+          '</div>';
+      }
+      html += '</article>';
+    });
+    root.innerHTML = html;
+  }
+
+  /* ---------- invoice window ---------- */
+  let cur = null; // { id, edit, panel, error }
+  function modalRoot(){
+    let m = $('act-inv-modal');
+    if (!m) {
+      m = document.createElement('div'); m.id = 'act-inv-modal'; m.className = 'sa-modal'; m.hidden = true;
+      m.innerHTML = '<div class="sa-sheet" role="dialog" aria-modal="true"></div>';
+      document.body.appendChild(m);
+      m.addEventListener('click', onModalClick);
+      m.addEventListener('input', onModalInput);
+    }
+    return m;
+  }
+  function logOf(s){
+    const ev = [];
+    ev.push({ d: s.createdAt || s.date, t: 'تم إنشاء الفاتورة' });
+    (s.editHistory || []).forEach(e => ev.push({ d: e.date, t: (e.action || 'تعديل') + (e.details ? ': ' + e.details : (e.item ? ': ' + e.item + (e.quantity ? ' × ' + e.quantity : '') : '')) }));
+    (s.payments || []).forEach(p => ev.push({ d: p.date, t: 'دفعة ' + money(p.amount) }));
+    (s.returnHistory || []).forEach(r => ev.push({ d: r.date, t: 'مرتجع ' + r.quantity + ' × ' + (r.itemName || '') + (r.working ? ' (رجع للمخزون)' : ' (غير صالح للبيع)') }));
+    return ev.filter(e => e.d).sort((a, b) => String(b.d).localeCompare(String(a.d)));
+  }
+  function renderModal(){
+    const m = modalRoot(); const sheet = m.firstElementChild;
+    const s = cur && findSale(cur.id);
+    if (!s) { closeModal(); return; }
+    const items = itemsOf(s); const st = statusOf(s); const edit = cur.edit;
+    sheet.setAttribute('data-sale-id', s.id);
+    let h = '<div class="sa-sheet-head"><div><span>فاتورة</span><h3>#' + esc(s.invoiceNumber) + '</h3></div><span class="sa-pill sa-pill-' + st.c + '">' + st.t + '</span><button type="button" class="sa-x" data-sa-close aria-label="إغلاق">✕</button></div>';
+    h += '<div class="sa-sheet-body">';
+    if (cur.error) h += '<div class="sa-error">' + esc(cur.error) + '</div>';
+    if (edit) {
+      h += '<div class="sa-grid2"><label>اسم العميل<input id="inv-cname" value="' + esc(s.customerName || '') + '"></label><label>رقم العميل<input id="inv-cphone" value="' + esc(s.customerPhone || '') + '"></label></div>';
+    } else {
+      h += '<div class="sa-meta"><span>👤 ' + esc(s.customerName || 'بدون اسم') + (s.customerPhone ? ' · ' + esc(s.customerPhone) : '') + '</span><span>🕒 ' + esc(fmtDate(s.date || s.createdAt)) + '</span></div>';
+    }
+    h += '<div class="sa-items">';
+    items.forEach((it, i) => {
+      const ret = num(it.returnedQuantity);
+      if (edit) {
+        h += '<div class="sa-item sa-item-edit"><input class="sa-in-name" data-i="' + i + '" value="' + esc(it.name || '') + '" placeholder="اسم الصنف">' +
+          '<div class="sa-grid2"><label>الكمية<input type="number" inputmode="numeric" min="' + Math.max(1, ret) + '" class="sa-in-qty" data-i="' + i + '" value="' + num(it.quantity || 1) + '"></label>' +
+          '<label>سعر القطعة<input type="number" inputmode="decimal" min="0" class="sa-in-price" data-i="' + i + '" value="' + unitOf(it) + '"></label></div></div>';
+      } else {
+        h += '<div class="sa-item"><div><strong>' + esc(it.name || 'صنف') + '</strong>' + (it.serial ? '<small>IMEI/سيريال: ' + esc(it.serial) + '</small>' : '') + (ret ? '<small class="sa-ret">مرتجع ' + ret + ' من ' + num(it.quantity || 1) + '</small>' : '') + '</div><div class="sa-item-end"><span>' + num(it.quantity || 1) + ' × ' + fmt(unitOf(it)) + '</span><b>' + money(num(it.quantity || 1) * unitOf(it)) + '</b></div></div>';
+      }
+    });
+    h += '</div>';
+    if (edit) {
+      h += '<div class="sa-grid2"><label>الخصم<input type="number" inputmode="decimal" min="0" id="inv-discount" value="' + num(s.discount) + '"></label><label>ملاحظات<input id="inv-notes" value="' + esc(s.notes || '') + '"></label></div>' +
+        '<p class="sa-hint">تعديل الكمية أو السعر بيغيّر حساب الفاتورة فقط ولا يغيّر المخزون. المخزون بيتعدّل مع المرتجع.</p>';
+    }
+    const price = items.reduce((t, it) => t + num(it.quantity || 1) * unitOf(it), 0);
+    h += '<div class="sa-totals" id="sa-totals"><div><span>الإجمالي</span><b id="sa-t-total">' + money(edit ? price - num(s.discount) : s.total) + '</b></div><div class="ok"><span>المدفوع</span><b>' + money(s.paid) + '</b></div><div class="bad"><span>المتبقي</span><b id="sa-t-due">' + money(edit ? Math.max(0, price - num(s.discount) - num(s.paid)) : s.due) + '</b></div></div>';
+    if (num(s.discount) > 0 && !edit) h += '<p class="sa-hint">بعد خصم ' + money(s.discount) + '</p>';
+    if (!edit && s.notes) h += '<p class="sa-hint">ملاحظات: ' + esc(s.notes) + '</p>';
+
+    if (cur.panel === 'pay') {
+      h += '<div class="sa-panel"><h4>تسجيل دفعة</h4><div class="sa-row"><input type="number" inputmode="decimal" min="0" id="sa-pay-amount" placeholder="المبلغ (المتبقي ' + fmt(s.due) + ')"><button type="button" class="sa-btn sa-btn-main" data-sa-pay-confirm>تأكيد الدفعة</button></div></div>';
+    }
+    if (cur.panel === 'return') {
+      const avail = items.map((it, i) => ({ it, i, r: Math.max(0, num(it.quantity || 1) - num(it.returnedQuantity)) })).filter(x => x.r > 0);
+      if (!avail.length) h += '<div class="sa-panel"><h4>مرتجع</h4><p class="sa-hint">كل أصناف الفاتورة اترجعت بالفعل.</p></div>';
+      else h += '<div class="sa-panel"><h4>تسجيل مرتجع</h4><label>الصنف<select id="sa-ret-item">' + avail.map(x => '<option value="' + x.i + '" data-max="' + x.r + '">' + esc(x.it.name || 'صنف') + ' — متاح للإرجاع ' + x.r + '</option>').join('') + '</select></label>' +
+        '<div class="sa-grid2"><label>الكمية<input type="number" inputmode="numeric" min="1" id="sa-ret-qty" value="1"></label><label>حالة الصنف<select id="sa-ret-working"><option value="1">شغال وصالح للبيع (يرجع للمخزون)</option><option value="0">مش شغال (لا يرجع للمخزون)</option></select></label></div>' +
+        '<button type="button" class="sa-btn sa-btn-main" data-sa-ret-confirm>تأكيد المرتجع</button></div>';
+    }
+    h += '<div class="sa-actions">';
+    if (edit) h += '<button type="button" class="sa-btn sa-btn-main" data-sa-save>💾 حفظ التعديلات</button><button type="button" class="sa-btn" data-sa-cancel-edit>إلغاء</button>';
+    else h += '<button type="button" class="sa-btn sa-btn-main" data-sa-edit>✏️ تعديل</button><button type="button" class="sa-btn" data-sa-panel="pay">💵 تسجيل دفعة</button><button type="button" class="sa-btn" data-sa-panel="return">↩️ مرتجع</button><button type="button" class="sa-btn" data-sa-print>🖨️ طباعة</button>';
+    h += '</div>';
+    const log = logOf(s);
+    h += '<div class="sa-log"><h4>سجل الفاتورة</h4>' + (log.length ? log.map(e => '<div class="sa-log-row"><i></i><div><span>' + esc(e.t) + '</span><small>' + esc(fmtDate(e.d)) + '</small></div></div>').join('') : '<p class="sa-hint">لا يوجد سجل.</p>') + '</div>';
+    h += '</div>';
+    sheet.innerHTML = h;
+  }
+  function openModal(id, opts){
+    cur = { id: id, edit: !!(opts && opts.edit), panel: (opts && opts.panel) || null, error: '' };
+    const m = modalRoot(); m.hidden = false; document.documentElement.classList.add('sa-lock');
+    renderModal();
+    m.firstElementChild.scrollTop = 0;
+  }
+  function closeModal(){
+    const m = $('act-inv-modal'); if (m) m.hidden = true;
+    document.documentElement.classList.remove('sa-lock'); cur = null;
+  }
+  function recalcEdit(){
+    const s = cur && findSale(cur.id); if (!s) return;
+    const m = $('act-inv-modal');
+    let price = 0;
+    m.querySelectorAll('.sa-in-qty').forEach(q => {
+      const i = q.getAttribute('data-i'); const p = m.querySelector('.sa-in-price[data-i="' + i + '"]');
+      price += num(q.value) * num(p && p.value);
+    });
+    const disc = num($('inv-discount') && $('inv-discount').value);
+    const total = Math.max(0, price - disc);
+    const t = $('sa-t-total'), d = $('sa-t-due');
+    if (t) t.textContent = money(total);
+    if (d) d.textContent = money(Math.max(0, total - num(s.paid)));
+  }
+  function onModalInput(e){ if (cur && cur.edit && e.target.closest('.sa-sheet')) recalcEdit(); }
+  function saveEdit(){
+    const s = findSale(cur.id); const m = $('act-inv-modal'); if (!s) return;
+    const old = itemsOf(s); const next = []; const diff = [];
+    for (let i = 0; i < old.length; i++) {
+      const name = String(m.querySelector('.sa-in-name[data-i="' + i + '"]').value || '').trim();
+      const qty = Number(m.querySelector('.sa-in-qty[data-i="' + i + '"]').value);
+      const price = Number(m.querySelector('.sa-in-price[data-i="' + i + '"]').value);
+      if (!name) return fail('اكتب اسم كل صنف.');
+      if (!Number.isInteger(qty) || qty < Math.max(1, num(old[i].returnedQuantity))) return fail('الكمية لازم تكون رقم صحيح، ومش أقل من المرتجع.');
+      if (!Number.isFinite(price) || price < 0) return fail('السعر غير صحيح.');
+      if (name !== (old[i].name || '')) diff.push('الاسم ' + (old[i].name || '') + ' ← ' + name);
+      if (qty !== num(old[i].quantity || 1)) diff.push('كمية ' + name + ': ' + num(old[i].quantity || 1) + ' ← ' + qty);
+      if (price !== unitOf(old[i])) diff.push('سعر ' + name + ': ' + fmt(unitOf(old[i])) + ' ← ' + fmt(price));
+      next.push(Object.assign({}, old[i], { name: name, quantity: qty, unitPrice: price }));
+    }
+    const discount = Number($('inv-discount').value);
+    const price = next.reduce((t, it) => t + it.quantity * it.unitPrice, 0);
+    if (!Number.isFinite(discount) || discount < 0 || discount > price) return fail('الخصم غير صحيح.');
+    const total = price - discount;
+    if (total < num(s.paid)) return fail('الإجمالي الجديد أقل من المدفوع (' + fmt(s.paid) + '). قلّل الدفعات أو راجع الأسعار.');
+    const cname = $('inv-cname').value.trim(), cphone = $('inv-cphone').value.trim(), notes = $('inv-notes').value.trim();
+    if (discount !== num(s.discount)) diff.push('الخصم: ' + fmt(s.discount) + ' ← ' + fmt(discount));
+    if (cname !== (s.customerName || '') || cphone !== (s.customerPhone || '')) diff.push('بيانات العميل');
+    if (notes !== (s.notes || '')) diff.push('الملاحظات');
+    if (!diff.length) { cur.edit = false; cur.error = ''; renderModal(); return; }
+    API().update(s.id, function (x) {
+      x.items = next; x.price = price; x.discount = discount; x.total = total; x.due = Math.max(0, total - num(x.paid));
+      x.productName = next.map(i => i.name).filter(Boolean).join('، ');
+      x.customerName = cname; x.customerPhone = cphone; x.notes = notes;
+      x.editHistory = [{ action: 'تعديل الفاتورة', details: diff.join('، '), date: new Date().toISOString() }].concat(x.editHistory || []);
+    });
+    if (cname && cphone && typeof window.actCustomerUpsertFromSale === 'function') window.actCustomerUpsertFromSale({ name: cname, phone: cphone });
+    cur.edit = false; cur.error = ''; renderModal(); alert('تم حفظ تعديلات الفاتورة #' + s.invoiceNumber);
+  }
+  function fail(msg){ cur.error = msg; const keep = captureEdit(); renderModal(); restoreEdit(keep); const sh = $('act-inv-modal').firstElementChild; sh.scrollTop = 0; }
+  function captureEdit(){ const m = $('act-inv-modal'); const o = {}; m.querySelectorAll('input').forEach(i => { if (i.id) o['#' + i.id] = i.value; else if (i.dataset.i != null) o[i.className + i.dataset.i] = i.value; }); return o; }
+  function restoreEdit(o){ const m = $('act-inv-modal'); m.querySelectorAll('input').forEach(i => { const k = i.id ? '#' + i.id : (i.dataset.i != null ? i.className + i.dataset.i : ''); if (k && o[k] != null) i.value = o[k]; }); if (cur.edit) recalcEdit(); }
+  function onModalClick(e){
+    const t = e.target; if (!t.closest) return;
+    if (t === $('act-inv-modal') || t.closest('[data-sa-close]')) { closeModal(); return; }
+    if (!cur) return;
+    if (t.closest('[data-sa-edit]')) { cur.edit = true; cur.panel = null; cur.error = ''; renderModal(); return; }
+    if (t.closest('[data-sa-cancel-edit]')) { cur.edit = false; cur.error = ''; renderModal(); return; }
+    if (t.closest('[data-sa-save]')) { saveEdit(); return; }
+    const pn = t.closest('[data-sa-panel]'); if (pn) { const v = pn.getAttribute('data-sa-panel'); cur.panel = cur.panel === v ? null : v; cur.error = ''; renderModal(); return; }
+    if (t.closest('[data-sa-print]')) { try { API().printInvoice(cur.id); } catch (_) {} return; }
+    if (t.closest('[data-sa-pay-confirm]')) {
+      const s = findSale(cur.id); const amt = Number($('sa-pay-amount').value);
+      if (!Number.isFinite(amt) || amt <= 0) { cur.error = 'اكتب مبلغ صحيح.'; renderModal(); return; }
+      if (amt > num(s.due)) { cur.error = 'المبلغ أكبر من المتبقي (' + fmt(s.due) + ').'; renderModal(); return; }
+      API().update(s.id, function (x) { x.paid = num(x.paid) + amt; x.due = Math.max(0, num(x.total) - x.paid); x.payments = [{ amount: amt, date: new Date().toISOString() }].concat(x.payments || []); });
+      cur.panel = null; cur.error = ''; renderModal(); alert('تم تسجيل دفعة ' + money(amt)); return;
+    }
+    if (t.closest('[data-sa-ret-confirm]')) {
+      const s = findSale(cur.id); const sel = $('sa-ret-item'); const idx = Number(sel.value); const max = Number(sel.options[sel.selectedIndex].getAttribute('data-max'));
+      const qty = Number($('sa-ret-qty').value); const working = $('sa-ret-working').value === '1';
+      if (!Number.isInteger(qty) || qty < 1 || qty > max) { cur.error = 'الكمية غير صحيحة (المتاح ' + max + ').'; renderModal(); return; }
+      const ok = API().returnItem(s.id, idx, qty, working);
+      if (!ok) { cur.error = 'تعذر تسجيل المرتجع. راجع المخزون والكمية.'; renderModal(); return; }
+      cur.panel = null; cur.error = ''; renderModal(); alert(working ? 'تم تسجيل المرتجع وإرجاعه للمخزون' : 'تم تسجيل المرتجع بدون إضافته للمخزون'); return;
+    }
+  }
+
+  /* ---------- global wiring ---------- */
+  function refresh(){
+    renderHomeStats();
+    const v = $('sales-view-customers');
+    if (v && v.style.display !== 'none') renderCustomers();
+    if (cur) renderModal();
+  }
+  window.addEventListener('act-sales-data-updated', refresh);
+  window.addEventListener('act-user-data-ready', refresh);
+  document.addEventListener('DOMContentLoaded', function(){ setTimeout(renderHomeStats, 600); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && cur) closeModal(); });
+
+  document.addEventListener('click', function (e) {
+    const t = e.target; if (!t || !t.closest) return;
+    const card = t.closest('.independent-sales-card[data-sales-view="customers"]');
+    if (card) { setTimeout(renderCustomers, 0); return; }
+    if (t.closest('#home-sales,#nav-sales,#independent-sales-section .independent-sales-card')) setTimeout(renderHomeStats, 300);
+    const tog = t.closest('[data-sa-toggle]');
+    if (tog) { const k = tog.getAttribute('data-sa-toggle'); openKey = openKey === k ? '' : k; renderCustomers(); return; }
+    const op = t.closest('[data-sa-open]');
+    if (op) { openModal(op.getAttribute('data-sa-open')); return; }
+    const ed = t.closest('[data-edit-sale]');
+    if (ed) { e.preventDefault(); e.stopImmediatePropagation(); openModal(ed.getAttribute('data-edit-sale'), { edit: true }); return; }
+    const rt = t.closest('[data-return-sale]');
+    if (rt) { e.preventDefault(); e.stopImmediatePropagation(); openModal(rt.getAttribute('data-return-sale'), { panel: 'return' }); return; }
+    const first = t.closest('#sales-history-list td:first-child');
+    if (first && !t.closest('button')) {
+      const no = (first.textContent || '').replace('#', '').trim();
+      const s = sales().find(x => String(x.invoiceNumber) === no);
+      if (s) openModal(s.id);
+    }
+  }, true);
+  document.addEventListener('input', function (e) {
+    if (e.target && e.target.id === 'sa-customer-search') {
+      search = e.target.value; const pos = e.target.selectionStart; renderCustomers();
+      const el = $('sa-customer-search'); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch (_) {} }
+    }
+  });
+})();
+
+/* =========================================================
+   ACT SALES PRINT
+   Prints through a hidden frame (no pop-up windows, works on phones too).
+   - Invoice print from the invoice window
+   - Customer account statement from the customers view
+========================================================= */
+(function actSalesPrint(){
+  'use strict';
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const fmt = v => (Math.round(num(v) * 100) / 100).toLocaleString('en-US');
+  const date = d => { try { const x = new Date(d); return isNaN(x) ? '' : x.toLocaleDateString('en-GB'); } catch (_) { return ''; } };
+  const all = () => { try { return window.actPhoneManagerSales.getAll(); } catch (_) { return []; } };
+  const itemsOf = s => (Array.isArray(s.items) && s.items.length) ? s.items : [{ name: s.productName || 'صنف', quantity: 1, unitPrice: num(s.price || s.total), returnedQuantity: num(s.returnedQuantity) }];
+  const unitOf = it => num(it.unitPrice != null ? it.unitPrice : it.price);
+  const keyOf = s => { const p = String(s.customerPhone || '').trim(); const n = String(s.customerName || '').trim(); return p ? 'p:' + p : (n ? 'n:' + n.toLowerCase() : 'x:none'); };
+  const CSS = '@page{size:A4;margin:14mm}body{font-family:Tahoma,Arial,sans-serif;color:#111;margin:0;direction:rtl}h1{margin:0;font-size:22px}h2{font-size:15px;margin:18px 0 6px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1d4ed8;padding-bottom:10px;margin-bottom:12px}.brand{font-weight:800;color:#1d4ed8;font-size:20px}.muted{color:#555;font-size:12px}table{width:100%;border-collapse:collapse;margin-top:6px}th,td{border:1px solid #cfd6e4;padding:7px 8px;font-size:13px;text-align:right}th{background:#eef3ff}.tot{margin-top:12px;width:55%;margin-right:auto}.tot td{font-size:14px}.due{color:#b91c1c;font-weight:800}.ok{color:#047857;font-weight:800}.foot{margin-top:24px;text-align:center;color:#666;font-size:11px}.ret{color:#b45309;font-size:11px}';
+  function printHtml(title, body){
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';
+    document.body.appendChild(frame);
+    const doc = frame.contentWindow.document;
+    doc.open();
+    doc.write('<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>' + esc(title) + '</title><style>' + CSS + '</style></head><body>' + body + '<div class="foot">ACT Manager</div></body></html>');
+    doc.close();
+    const go = function () { try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (_) {} setTimeout(function () { frame.remove(); }, 60000); };
+    if (frame.contentWindow.document.readyState === 'complete') setTimeout(go, 150); else frame.onload = function () { setTimeout(go, 150); };
+  }
+  function invoiceBody(s){
+    const rows = itemsOf(s).map((it, i) => {
+      const q = num(it.quantity || 1), r = num(it.returnedQuantity);
+      return '<tr><td>' + (i + 1) + '</td><td>' + esc(it.name) + (it.serial ? '<br><small>' + esc(it.serial) + '</small>' : '') + (r ? '<br><span class="ret">مرتجع ' + r + '</span>' : '') + '</td><td>' + q + '</td><td>' + fmt(unitOf(it)) + '</td><td>' + fmt(q * unitOf(it)) + '</td></tr>';
+    }).join('');
+    return '<div class="top"><div><div class="brand">ACT Manager</div><div class="muted">فاتورة بيع</div></div><div style="text-align:left"><h1>#' + esc(s.invoiceNumber) + '</h1><div class="muted">' + esc(date(s.date || s.createdAt)) + '</div></div></div>' +
+      '<div><b>العميل:</b> ' + esc(s.customerName || '-') + (s.customerPhone ? ' &nbsp; <b>الهاتف:</b> ' + esc(s.customerPhone) : '') + '</div>' +
+      '<table><thead><tr><th>#</th><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<table class="tot"><tr><td>الإجمالي قبل الخصم</td><td>' + fmt(s.price) + '</td></tr>' + (num(s.discount) ? '<tr><td>الخصم</td><td>' + fmt(s.discount) + '</td></tr>' : '') + '<tr><td>الإجمالي</td><td><b>' + fmt(s.total) + '</b></td></tr><tr><td>المدفوع</td><td class="ok">' + fmt(s.paid) + '</td></tr><tr><td>المتبقي</td><td class="due">' + fmt(s.due) + '</td></tr></table>' +
+      (s.notes ? '<p class="muted">ملاحظات: ' + esc(s.notes) + '</p>' : '');
+  }
+  function statementBody(key){
+    const list = all().filter(s => keyOf(s) === key).sort((a, b) => String(a.date || a.createdAt || '').localeCompare(String(b.date || b.createdAt || '')));
+    if (!list.length) return '';
+    const name = list.map(s => s.customerName).find(Boolean) || 'عميل', phone = list.map(s => s.customerPhone).find(Boolean) || '';
+    const total = list.reduce((t, s) => t + num(s.total), 0), paid = list.reduce((t, s) => t + num(s.paid), 0), due = list.reduce((t, s) => t + num(s.due), 0);
+    const inv = list.map(s => '<tr><td>#' + esc(s.invoiceNumber) + '</td><td>' + esc(date(s.date || s.createdAt)) + '</td><td>' + esc(itemsOf(s).map(i => (i.name || '') + ' × ' + (i.quantity || 1) + (num(i.returnedQuantity) ? ' (مرتجع ' + num(i.returnedQuantity) + ')' : '')).join('، ')) + '</td><td>' + fmt(s.total) + '</td><td>' + fmt(s.paid) + '</td><td>' + fmt(s.due) + '</td></tr>').join('');
+    return '<div class="top"><div><div class="brand">ACT Manager</div><div class="muted">كشف حساب عميل</div></div><div style="text-align:left"><h1>' + esc(name) + '</h1><div class="muted">' + esc(phone) + ' · ' + esc(new Date().toLocaleDateString('en-GB')) + '</div></div></div>' +
+      '<table><thead><tr><th>الفاتورة</th><th>التاريخ</th><th>الأصناف</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th></tr></thead><tbody>' + inv + '</tbody></table>' +
+      '<table class="tot"><tr><td>إجمالي الفواتير</td><td><b>' + fmt(total) + '</b></td></tr><tr><td>إجمالي المدفوع</td><td class="ok">' + fmt(paid) + '</td></tr><tr><td>إجمالي المتبقي</td><td class="due">' + fmt(due) + '</td></tr></table>';
+  }
+  document.addEventListener('click', function (e) {
+    const t = e.target; if (!t || !t.closest) return;
+    const pr = t.closest('[data-sa-print]');
+    if (pr) {
+      const id = (t.closest('.sa-sheet') || {}).getAttribute && t.closest('.sa-sheet').getAttribute('data-sale-id');
+      const s = all().find(x => String(x.id) === String(id));
+      if (s) { e.preventDefault(); e.stopImmediatePropagation(); printHtml('فاتورة ' + s.invoiceNumber, invoiceBody(s)); }
+      return;
+    }
+    const st = t.closest('[data-sa-statement]');
+    if (st) { e.preventDefault(); e.stopImmediatePropagation(); const body = statementBody(st.getAttribute('data-sa-statement')); if (body) printHtml('كشف حساب', body); }
+  }, true);
+})();

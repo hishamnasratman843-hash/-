@@ -5,7 +5,7 @@
   const tracked = [
     "home-section","sales-area","customers-section","employees-section",
     "more-section","independent-sales-section","independent-purchases-section",
-    "wallet-section","account-section","phone-sale-section","phone-purchases-section","sales-view-new","sales-view-history","sales-view-reports","maintenance-status-view"
+    "wallet-section","account-section","phone-sale-section","phone-purchases-section","sales-view-new","sales-view-customers","sales-view-history","sales-view-reports","maintenance-status-view"
   ];
   const visible = el => {
     if (!el || el.hidden) return false;
