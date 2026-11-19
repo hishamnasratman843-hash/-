@@ -75,7 +75,7 @@
 
     <link
         rel="stylesheet"
-        href="style.css?v=20261119-sales-premium-2"
+        href="style.css?v=20261119-sales-premium-3"
     >
 
 
@@ -3417,25 +3417,7 @@
         </button>
 
 
-        <button
-            class="independent-sales-card"
-            type="button"
-            data-sales-view="history"
-        >
-
-            <span class="independent-sales-icon">
-                📋
-            </span>
-
-            <strong>
-                سجل المبيعات
-            </strong>
-
-            <small>
-                عرض عمليات البيع السابقة
-            </small>
-
-        </button>
+        
 
 
         <button
@@ -3500,367 +3482,122 @@
      NEW SALE
 ================================================== -->
 
-<div
-    id="sales-view-new"
-    class="independent-sales-view sales-new-view"
-    style="display:none;"
->
+<div id="sales-view-new" class="independent-sales-view sales-new-view sn" style="display:none;">
 
-    <div class="sales-view-header">
-
-        <div>
-
-            <span class="sales-view-label">
-                NEW SALE
-            </span>
-
-            <h3>
-                🧾 بيع جديد
-            </h3>
-
-            <p>
-                تسجيل عملية بيع وحساب المدفوع والمتبقي
-            </p>
-
+    <div class="sn-hero">
+        <div class="sn-hero-top">
+            <div>
+                <small>NEW SALE</small>
+                <h3>🧾 بيع جديد</h3>
+                <p>تسجيل عملية بيع وحساب المدفوع والمتبقي</p>
+            </div>
+            <div class="sn-inv"><span>رقم الفاتورة</span><b id="new-sale-invoice-number">تلقائي</b></div>
         </div>
-
-        <div class="sales-invoice-badge">
-
-            <span>
-                رقم الفاتورة
-            </span>
-
-            <strong id="new-sale-invoice-number">
-                تلقائي
-            </strong>
-
+        <div class="sn-tiles">
+            <div><span>الأصناف</span><b id="sn-t-items">0</b></div>
+            <div><span>الإجمالي</span><b id="sn-t-total">0</b></div>
+            <div><span>المدفوع</span><b id="sn-t-paid">0</b></div>
+            <div><span>المتبقي</span><b id="sn-t-due">0</b></div>
         </div>
-
     </div>
 
-
-    <div class="sales-new-summary">
-
-        <div class="sales-mini-card">
-
-            <span>
-                عدد الأصناف
-            </span>
-
-            <strong id="new-sale-items-count">
-                1
-            </strong>
-
+    <div class="sn-card">
+        <div class="sn-ch"><div class="sn-ci" style="background:linear-gradient(135deg,#7c3aed,#c084fc)">👤</div><div><strong>بيانات العميل</strong><small>اكتب أول حروف الاسم أو الرقم وهيظهر العميل المسجل</small></div></div>
+        <div class="sn-f sn-rel">
+            <label for="sale-customer">اسم العميل</label>
+            <input type="text" id="sale-customer" autocomplete="off" data-suggest="customer" placeholder="👤 اسم العميل">
+            <div class="sn-suggest" hidden></div>
         </div>
-
-
-        <div class="sales-mini-card">
-
-            <span>
-                الإجمالي
-            </span>
-
-            <strong id="new-sale-total">
-                0 جنيه
-            </strong>
-
+        <div class="sn-f sn-rel">
+            <label for="sale-phone">رقم الهاتف</label>
+            <input type="tel" inputmode="tel" id="sale-phone" autocomplete="off" data-suggest="customer" placeholder="📞 رقم العميل">
+            <div class="sn-suggest" hidden></div>
         </div>
-
-
-        <div class="sales-mini-card">
-
-            <span>
-                المدفوع
-            </span>
-
-            <strong id="new-sale-paid">
-                0 جنيه
-            </strong>
-
+        <div id="sn-balance" class="sn-balance" hidden></div>
+        <div class="sn-chips" id="sn-customer-tools" hidden>
+            <button type="button" class="sn-chip" id="sn-repeat-last">🔁 كرر آخر فاتورته</button>
+            <button type="button" class="sn-chip" id="sn-open-account">📄 حساب العميل</button>
         </div>
-
-
-        <div class="sales-mini-card">
-
-            <span>
-                المتبقي
-            </span>
-
-            <strong id="new-sale-due">
-                0 جنيه
-            </strong>
-
-        </div>
-
     </div>
 
+    <div class="sn-card">
+        <div class="sn-ch"><div class="sn-ci" style="background:linear-gradient(135deg,#2563eb,#38bdf8)">📦</div><div><strong>الأصناف</strong><small>اختار من المخزون وهتتعبى البيانات لوحدها</small></div></div>
 
-    <div class="sales-form-card">
-
-        <div class="sales-form-title">
-
-            <div class="sales-form-title-icon">
-                📦
+        <div class="sn-item" data-sn-scope>
+            <div class="sn-itop"><b>الصنف 1</b><span class="sn-avail" hidden></span></div>
+            <select id="sale-item-type" data-f="type" hidden><option value="phone">📱 جهاز / تلفون</option><option value="accessory">🎧 إكسسوار</option><option value="other">📦 صنف آخر</option></select>
+            <div class="sn-seg"><button type="button" data-type="phone" class="on">📱 جهاز</button><button type="button" data-type="accessory">🎧 إكسسوار</button><button type="button" data-type="other">📦 صنف آخر</button></div>
+            <div class="sn-f sn-rel">
+                <label for="sale-product-name">اسم المنتج</label>
+                <input type="text" id="sale-product-name" data-f="name" data-suggest="product" autocomplete="off" placeholder="🔎 اكتب أول حروف الاسم">
+                <div class="sn-suggest" hidden></div>
             </div>
-
-            <div>
-
-                <strong>
-                    بيانات المنتج والعميل
-                </strong>
-
-                <small>
-                    أدخل تفاصيل عملية البيع
-                </small>
-
+            <div class="sn-f" data-serial-field>
+                <label for="sale-serial">السيريال / IMEI</label>
+                <input type="text" id="sale-serial" data-f="serial" autocomplete="off" placeholder="🔢 السيريال أو IMEI">
             </div>
-
+            <div class="sn-r2">
+                <div class="sn-f"><label>الكمية</label><div class="sn-step"><button type="button" data-step="1" aria-label="زيادة">＋</button><input type="number" id="sale-item-quantity" data-f="qty" min="1" step="1" value="1" inputmode="numeric"><button type="button" data-step="-1" aria-label="نقص">−</button></div></div>
+                <div class="sn-f"><label for="sale-price">سعر القطعة</label><input type="number" id="sale-price" data-f="price" min="0" step="0.01" inputmode="decimal" placeholder="💰 سعر البيع"></div>
+            </div>
+            <div class="sn-line"><span>إجمالي الصنف</span><b data-line-total>0 ج</b></div>
         </div>
 
+        <div id="sale-extra-items"></div>
+        <button type="button" id="sale-add-item-button" class="sn-add">＋ إضافة صنف آخر للفاتورة</button>
+    </div>
 
-        <div class="sales-form-grid">
-
-
-            <div class="sales-field">
-
-                <label for="sale-product-name">
-                    اسم المنتج
-                </label>
-
-                <input
-                    type="text"
-                    id="sale-product-name"
-                    placeholder="📱 اسم الجهاز أو المنتج"
-                >
-
+    <div class="sn-card">
+        <div class="sn-ch"><div class="sn-ci" style="background:linear-gradient(135deg,#059669,#34d399)">💰</div><div><strong>الدفع</strong><small>الخصم والمدفوع وطريقة الدفع</small></div></div>
+        <select id="sale-payment-method" hidden>
+            <option value="cash">💵 كاش</option><option value="card">💳 بطاقة</option><option value="transfer">🏦 تحويل</option><option value="installment">📆 تقسيط</option><option value="credit">🧾 آجل</option>
+        </select>
+        <div class="sn-f"><label>طريقة الدفع</label>
+            <div class="sn-chips" id="sn-method-chips">
+                <button type="button" class="sn-chip on" data-method="cash">💵 كاش</button>
+                <button type="button" class="sn-chip" data-method="card">💳 بطاقة</button>
+                <button type="button" class="sn-chip" data-method="transfer">🏦 تحويل</button>
+                <button type="button" class="sn-chip" data-method="installment">📆 تقسيط</button>
+                <button type="button" class="sn-chip" data-method="credit">🧾 آجل</button>
             </div>
-
-
-            <div class="sales-field">
-
-                <label for="sale-serial">
-                    السيريال / IMEI
-                </label>
-
-                <input
-                    type="text"
-                    id="sale-serial"
-                    placeholder="🔢 السيريال أو IMEI"
-                >
-
-            </div>
-
-
-            <div class="sales-field">
-
-                <label for="sale-customer">
-                    اسم العميل
-                </label>
-
-                <input
-                    type="text"
-                    id="sale-customer"
-                    placeholder="👤 اسم العميل"
-                >
-
-            </div>
-
-
-            <div class="sales-field">
-
-                <label for="sale-phone">
-                    رقم الهاتف
-                </label>
-
-                <input
-                    type="text"
-                    id="sale-phone"
-                    placeholder="📞 رقم العميل"
-                >
-
-            </div>
-
-
-            <div class="sales-field">
-
-                <label for="sale-price">
-                    السعر
-                </label>
-
-                <input
-                    type="number"
-                    id="sale-price"
-                    min="0"
-                    step="0.01"
-                    placeholder="💰 سعر البيع"
-                >
-
-            </div>
-
-
-            <div class="sales-field">
-
-                <label for="sale-discount">
-                    الخصم
-                </label>
-
-                <input
-                    type="number"
-                    id="sale-discount"
-                    min="0"
-                    step="0.01"
-                    value="0"
-                    placeholder="🏷️ قيمة الخصم"
-                >
-
-            </div>
-
-
-            <div class="sales-field">
-
-                <label for="sale-paid">
-                    المبلغ المدفوع
-                </label>
-
-                <input
-                    type="number"
-                    id="sale-paid"
-                    min="0"
-                    step="0.01"
-                    value="0"
-                    placeholder="💵 المبلغ المدفوع"
-                >
-
-            </div>
-
-
-            <div class="sales-field">
-
-                <label for="sale-payment-method">
-                    طريقة الدفع
-                </label>
-
-                <select id="sale-payment-method">
-
-                    <option value="cash">
-                        💵 كاش
-                    </option>
-
-                    <option value="card">
-                        💳 بطاقة
-                    </option>
-
-                    <option value="transfer">
-                        🏦 تحويل
-                    </option>
-
-                    <option value="installment">
-                        📆 تقسيط
-                    </option>
-
-                    <option value="credit">
-                        🧾 آجل
-                    </option>
-
-                </select>
-
-            </div>
-
-
-            <div class="sales-field sales-field-full">
-
-                <label for="sale-notes">
-                    ملاحظات البيع
-                </label>
-
-                <textarea
-                    id="sale-notes"
-                    rows="4"
-                    placeholder="📝 أي ملاحظات تخص عملية البيع..."
-                ></textarea>
-
-            </div>
-
         </div>
-
-
-        <div class="sales-calculation-box">
-
-            <div>
-
-                <span>
-                    السعر
-                </span>
-
-                <strong id="sale-calculation-price">
-                    0 جنيه
-                </strong>
-
-            </div>
-
-            <div>
-
-                <span>
-                    الخصم
-                </span>
-
-                <strong id="sale-calculation-discount">
-                    0 جنيه
-                </strong>
-
-            </div>
-
-            <div>
-
-                <span>
-                    الإجمالي النهائي
-                </span>
-
-                <strong id="sale-calculation-total">
-                    0 جنيه
-                </strong>
-
-            </div>
-
-            <div>
-
-                <span>
-                    المتبقي
-                </span>
-
-                <strong id="sale-calculation-due">
-                    0 جنيه
-                </strong>
-
-            </div>
-
+        <div class="sn-r2">
+            <div class="sn-f"><label for="sale-discount">الخصم</label><input type="number" id="sale-discount" min="0" step="0.01" value="0" inputmode="decimal" placeholder="🏷️ قيمة الخصم"></div>
+            <div class="sn-f"><label for="sale-paid">المبلغ المدفوع</label><input type="number" id="sale-paid" min="0" step="0.01" value="0" inputmode="decimal" placeholder="💵 المبلغ المدفوع"></div>
         </div>
-
-
-        <div class="sales-form-actions">
-
-            <button
-                id="clear-new-sale-button"
-                type="button"
-                class="sales-secondary-button"
-            >
-                🗑️ مسح البيانات
-            </button>
-
-            <button
-                id="save-new-sale-button"
-                type="button"
-                class="sales-primary-button"
-            >
-                💾 حفظ عملية البيع
-            </button>
-
+        <div class="sn-chips sn-gap">
+            <button type="button" class="sn-chip" data-pay="all">كامل المبلغ</button>
+            <button type="button" class="sn-chip" data-pay="half">النص</button>
+            <button type="button" class="sn-chip" data-pay="none">آجل بالكامل</button>
+            <button type="button" class="sn-chip" data-disc="5">خصم 5%</button>
+            <button type="button" class="sn-chip" data-disc="10">خصم 10%</button>
         </div>
+        <div class="sn-f" id="sn-due-field" hidden>
+            <label for="sale-due-date">موعد السداد المتوقع</label>
+            <input type="date" id="sale-due-date">
+            <div class="sn-chips"><button type="button" class="sn-chip" data-due-days="7">بعد أسبوع</button><button type="button" class="sn-chip" data-due-days="15">بعد 15 يوم</button><button type="button" class="sn-chip" data-due-days="30">بعد شهر</button></div>
+        </div>
+        <div class="sn-f"><label for="sale-notes">ملاحظات البيع</label><textarea id="sale-notes" rows="3" placeholder="📝 أي ملاحظات تخص عملية البيع..."></textarea></div>
+    </div>
 
+    <div class="sn-card">
+        <div class="sn-ch"><div class="sn-ci" style="background:linear-gradient(135deg,#ea580c,#fbbf24)">🧮</div><div><strong>ملخص الحساب</strong><small>بيتحدث لحظة بلحظة</small></div></div>
+        <div class="sn-tot"><span>إجمالي الأصناف</span><strong id="sale-calculation-price">0 جنيه</strong></div>
+        <div class="sn-tot"><span>الخصم</span><strong id="sale-calculation-discount">0 جنيه</strong></div>
+        <div class="sn-tot"><span>الإجمالي النهائي</span><strong id="sale-calculation-total">0 جنيه</strong></div>
+        <div class="sn-big"><span>المتبقي على الفاتورة</span><strong id="sale-calculation-due">0 جنيه</strong></div>
+        <div class="sn-after" id="sn-after" hidden></div>
+        <div class="sn-toggles">
+            <label><input type="checkbox" id="sn-print-after"><span class="sn-sw"></span>🖨️ طباعة بعد الحفظ</label>
+            <label><input type="checkbox" id="sn-wa-after"><span class="sn-sw"></span>💬 إرسال واتساب</label>
+        </div>
+        <div class="sn-acts">
+            <button id="clear-new-sale-button" type="button" class="sn-btn">🗑️ مسح</button>
+            <button id="save-new-sale-button" type="button" class="sn-btn sn-main">💾 حفظ عملية البيع</button>
+        </div>
     </div>
 
 </div>
-
 
 <!-- =================================================
      SALES HISTORY
@@ -7014,7 +6751,7 @@
 <script type="module" src="./fix-activation.js"></script>
 <script src="./i18n-en.js"></script>
 <script src="./pwa-install.js"></script>
-<script type="module" src="./script.js?v=20261119-home-exit-device-default-5"></script>
+<script type="module" src="./script.js?v=20261119-home-exit-device-default-6"></script>
 <script src="./act-workspace-persistence.js"></script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>

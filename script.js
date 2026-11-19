@@ -13033,25 +13033,10 @@ function saveSalesData() {
        ========================================================= */
 
     function ensureSalesMultiItemUI() {
-        const form = document.querySelector("#sales-view-new .sales-form-grid");
-        if (!form || document.getElementById("sale-add-item-button")) return;
-        const firstProduct = document.getElementById("sale-product-name");
-        const firstSerial = document.getElementById("sale-serial");
-        const firstPrice = document.getElementById("sale-price");
-        if (!firstProduct || !firstSerial || !firstPrice) return;
-        const typeField = document.createElement("div");
-        typeField.className = "sales-field";
-        typeField.innerHTML = '<label for="sale-item-type">نوع الصنف</label><select id="sale-item-type"><option value="phone">📱 جهاز / تلفون</option><option value="accessory">🎧 إكسسوار</option><option value="other">📦 صنف آخر</option></select>';
-        const qtyField = document.createElement("div");
-        qtyField.className = "sales-field";
-        qtyField.innerHTML = '<label for="sale-item-quantity">الكمية</label><input id="sale-item-quantity" type="number" min="1" step="1" value="1">';
-        firstProduct.parentElement.before(typeField);
-        firstProduct.parentElement.after(qtyField);
-        const tools = document.createElement("div");
-        tools.className = "sales-multi-item-tools sales-field-full";
-        tools.innerHTML = '<button type="button" id="sale-add-item-button">＋ إضافة صنف آخر للفاتورة</button><span id="sale-extra-items"></span>';
-        form.after(tools);
-        document.getElementById("sale-add-item-button").addEventListener("click", addExtraSaleItem);
+        const addButton = document.getElementById("sale-add-item-button");
+        if (!addButton || addButton.dataset.bound === "1") return;
+        addButton.dataset.bound = "1";
+        addButton.addEventListener("click", addExtraSaleItem);
         ["sale-item-type", "sale-item-quantity"].forEach(id => document.getElementById(id)?.addEventListener("change", updateNewSaleSummary));
     }
 
@@ -13061,9 +13046,17 @@ function saveSalesData() {
         if (!host) return;
         const id = ++saleExtraItemSequence;
         const row = document.createElement("div");
-        row.className = "sale-extra-item-row";
+        row.className = "sn-item";
         row.dataset.saleItemRow = String(id);
-        row.innerHTML = `<div class="sales-field"><label>نوع الصنف</label><select data-item-type><option value="phone">📱 جهاز / تلفون</option><option value="accessory">🎧 إكسسوار</option><option value="other">📦 صنف آخر</option></select></div><div class="sales-field"><label>اسم المنتج</label><input data-item-name type="text" placeholder="اسم المنتج"></div><div class="sales-field"><label>السيريال / IMEI</label><input data-item-serial type="text" placeholder="السيريال (إن وجد)"></div><div class="sales-field"><label>الكمية</label><input data-item-quantity type="number" min="1" step="1" value="1"></div><div class="sales-field"><label>سعر الوحدة</label><input data-item-price type="number" min="0" step="0.01" placeholder="سعر الوحدة"></div><button type="button" class="sale-remove-item" aria-label="حذف الصنف">حذف الصنف ✕</button>`;
+        row.setAttribute("data-sn-scope", "");
+        row.innerHTML = `<div class="sn-itop"><b>الصنف ${id + 1}</b><span class="sn-avail" hidden></span><button type="button" class="sale-remove-item sn-remove" aria-label="حذف الصنف">🗑️ حذف</button></div>
+            <select data-item-type data-f="type" hidden><option value="phone">📱 جهاز / تلفون</option><option value="accessory">🎧 إكسسوار</option><option value="other" selected>📦 صنف آخر</option></select>
+            <div class="sn-seg"><button type="button" data-type="phone">📱 جهاز</button><button type="button" data-type="accessory">🎧 إكسسوار</button><button type="button" data-type="other" class="on">📦 صنف آخر</button></div>
+            <div class="sn-f sn-rel"><label>اسم المنتج</label><input data-item-name data-f="name" data-suggest="product" type="text" autocomplete="off" placeholder="🔎 اكتب أول حروف الاسم"><div class="sn-suggest" hidden></div></div>
+            <div class="sn-f" data-serial-field hidden><label>السيريال / IMEI</label><input data-item-serial data-f="serial" type="text" autocomplete="off" placeholder="🔢 السيريال أو IMEI"></div>
+            <div class="sn-r2"><div class="sn-f"><label>الكمية</label><div class="sn-step"><button type="button" data-step="1" aria-label="زيادة">＋</button><input data-item-quantity data-f="qty" type="number" min="1" step="1" value="1" inputmode="numeric"><button type="button" data-step="-1" aria-label="نقص">−</button></div></div>
+            <div class="sn-f"><label>سعر القطعة</label><input data-item-price data-f="price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="💰 سعر البيع"></div></div>
+            <div class="sn-line"><span>إجمالي الصنف</span><b data-line-total>0 ج</b></div>`;
         host.append(row);
         row.addEventListener("input", updateNewSaleSummary);
         row.addEventListener("change", updateNewSaleSummary);
@@ -13251,6 +13244,8 @@ function saveSalesData() {
         if (itemType) itemType.value = "phone";
         const itemQuantity = document.getElementById("sale-item-quantity");
         if (itemQuantity) itemQuantity.value = "1";
+        const dueDateInput = document.getElementById("sale-due-date");
+        if (dueDateInput) dueDateInput.value = "";
 
         const paymentMethod =
             document.getElementById(
@@ -13415,6 +13410,8 @@ function saveSalesData() {
 
             notes,
 
+            dueDate: (document.getElementById("sale-due-date") || {}).value || "",
+
             date:
                 now.toISOString(),
 
@@ -13520,20 +13517,8 @@ function saveSalesData() {
         clearNewSaleForm();
 
 
-        /*
-         * الانتقال تلقائيًا إلى سجل المبيعات
-         */
-
-        const historyCard =
-            document.querySelector(
-                '.independent-sales-card[data-sales-view="history"]'
-            );
-
-        if (historyCard) {
-
-            historyCard.click();
-
-        }
+        // Hand over to the sales UI: print / WhatsApp if requested, then open the invoice.
+        window.dispatchEvent(new CustomEvent("act-sale-saved", { detail: { id: sale.id } }));
 
     }
 
@@ -16264,6 +16249,73 @@ if (walletCancelOperation) {
             sale.updatedAt = new Date().toISOString();
             saveSalesData(); renderSalesHistory(); renderSalesReports();
             return true;
+        },
+        getNewSaleValues: getNewSaleValues,
+        nextInvoiceNumber: getNextInvoiceNumber,
+        addItem: function (saleId, raw) {
+            const sale = salesData.find(item => String(item.id) === String(saleId));
+            if (!sale) return { ok: false, error: "الفاتورة غير موجودة." };
+            const item = {
+                type: ["phone", "accessory", "other"].includes(raw && raw.type) ? raw.type : "other",
+                name: String((raw && raw.name) || "").trim(),
+                serial: String((raw && raw.serial) || "").trim(),
+                quantity: Math.floor(Number(raw && raw.quantity) || 0),
+                unitPrice: Number(raw && raw.unitPrice),
+                returnedQuantity: 0,
+                addedAfterInvoice: true
+            };
+            if (!item.name) return { ok: false, error: "اكتب اسم الصنف." };
+            if (!Number.isInteger(item.quantity) || item.quantity < 1) return { ok: false, error: "الكمية لازم تكون رقم صحيح أكبر من صفر." };
+            if (!Number.isFinite(item.unitPrice) || item.unitPrice < 0) return { ok: false, error: "السعر غير صحيح." };
+            if (item.type !== "phone") item.serial = "";
+            if (item.type === "phone" && item.serial && item.quantity > 1) return { ok: false, error: "الجهاز اللي له سيريال بيتباع قطعة واحدة في كل صنف." };
+
+            if (item.type === "phone" && Array.isArray(devices)) {
+                const wantedName = item.name.toLocaleLowerCase("ar");
+                const matching = devices.filter(record => {
+                    const isForSale = record.section === "sale" || record.category === SECTIONS.SALE || record.status === "البيع";
+                    if (!isForSale) return false;
+                    if (item.serial) return String(record.serialNumber || record.serial || "").trim() === item.serial;
+                    return String(record.phoneName || record.productName || record.name || "").trim().toLocaleLowerCase("ar") === wantedName;
+                }).slice(0, item.quantity);
+                if (matching.length && matching.length !== item.quantity) return { ok: false, error: `الجهاز ${item.name} موجود في بيع التلفونات بعدد ${matching.length} فقط.` };
+                item.deviceRecords = matching.map(record => ({ ...record }));
+            }
+
+            const consumed = [];
+            const rollback = () => consumed.slice().reverse().forEach(entry => {
+                if (entry.type === "phone") window.actPhoneInventoryRestoreSale?.(entry.name, entry.serial, entry.quantity || 1);
+                if (entry.type === "accessory") window.actAccessoryRestoreSale?.(entry.name, entry.quantity || 1);
+            });
+            if (item.type === "accessory") {
+                const result = window.actAccessoryConsumeSale ? window.actAccessoryConsumeSale(item.name, item.quantity) : { matched: false, ok: false };
+                if (!result.matched || !result.ok) return { ok: false, error: result.matched ? `الكمية المتاحة من «${item.name}» أقل من ${item.quantity}.` : `الصنف «${item.name}» غير موجود في الإكسسوارات.` };
+                consumed.push({ type: "accessory", name: item.name, quantity: item.quantity });
+            } else if (item.type === "phone" && !(item.deviceRecords && item.deviceRecords.length === item.quantity)) {
+                for (let unit = 0; unit < item.quantity; unit++) {
+                    const result = window.actPhoneInventoryConsumeSale ? window.actPhoneInventoryConsumeSale(item.name, item.serial) : { matched: false, ok: false };
+                    if (!result.matched || !result.ok) { rollback(); return { ok: false, error: `الجهاز «${item.name}» غير موجود أو غير متاح في بيع التلفونات.` }; }
+                    consumed.push({ type: "phone", name: item.name, serial: item.serial, quantity: 1 });
+                }
+            }
+
+            if (!Array.isArray(sale.items) || !sale.items.length) {
+                sale.items = [{ type: "other", name: sale.productName || "الصنف السابق", serial: sale.serial || "", quantity: 1, unitPrice: Number(sale.price || sale.total || 0), returnedQuantity: Number(sale.returnedQuantity || 0) }];
+            }
+            sale.items.push(item);
+            sale.stockMovements = (Array.isArray(sale.stockMovements) ? sale.stockMovements : []).concat(consumed);
+            const soldIds = new Set((item.deviceRecords || []).map(record => record.id));
+            if (soldIds.size && Array.isArray(devices)) { devices = devices.filter(record => !soldIds.has(record.id)); persistSalesLinkedDevices(); }
+            const subtotal = sale.items.reduce((sum, x) => sum + Math.max(0, Number(x.unitPrice ?? x.price ?? 0)) * Math.max(0, Number(x.quantity || 1)), 0);
+            sale.price = subtotal;
+            sale.total = Math.max(0, subtotal - Number(sale.discount || 0));
+            sale.due = Math.max(0, sale.total - Number(sale.paid || 0));
+            sale.productName = sale.items.map(x => x.name).filter(Boolean).join("، ");
+            sale.serial = sale.items.map(x => x.serial).filter(Boolean).join("، ");
+            sale.updatedAt = new Date().toISOString();
+            sale.editHistory = [{ action: "إضافة صنف للفاتورة", details: `${item.name} × ${item.quantity} بسعر ${item.unitPrice}`, date: sale.updatedAt }].concat(Array.isArray(sale.editHistory) ? sale.editHistory : []);
+            saveSalesData(); renderSalesHistory(); renderSalesReports();
+            return { ok: true };
         },
         returnItem: function (saleId, itemIndex, quantity, working) {
             const sale = salesData.find(item => String(item.id) === String(saleId));
@@ -23595,6 +23647,7 @@ if ("serviceWorker" in navigator) {
     notify('تم إرجاع إكسسوار للمخزون',`${item.name} — ${count} قطعة`,'↩️');renderAccessories();return {matched:true,ok:true,remaining:item.quantity};
   }
   window.actAccessoryConsumeSale=consumeAccessorySale;
+  window.actAccessoryList=function(){try{return read().map(x=>({id:x.id,name:x.name||'',code:x.code||'',quantity:Number(x.quantity)||0,price:Number(x.price)||0}));}catch(e){return [];}};
   window.actAccessoryRestoreSale=restoreAccessorySale;
 
   function readArrayFor(type){const key=typeof getUserKey==='function'?getUserKey(type):`actPhoneManager_${type}_guest`;return readKey(key);}
@@ -23951,6 +24004,7 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
   const returnedValue = s => itemsOf(s).reduce((t, it) => t + num(it.returnedQuantity) * unitOf(it), 0);
   const statusOf = s => {
     if (s.returned) return { t: 'مرتجع كامل', c: 'gray' };
+    if (num(s.due) > 0 && s.dueDate && String(s.dueDate) < new Date().toISOString().slice(0, 10)) return { t: 'متأخرة', c: 'bad' };
     if (num(s.due) > 0) return { t: num(s.paid) > 0 ? 'آجل جزئي' : 'آجل', c: 'warn' };
     return { t: 'مدفوعة', c: 'ok' };
   };
@@ -24081,7 +24135,7 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
     if (edit) {
       h += '<div class="sa-grid2"><label>اسم العميل<input id="inv-cname" value="' + esc(s.customerName || '') + '"></label><label>رقم العميل<input id="inv-cphone" value="' + esc(s.customerPhone || '') + '"></label></div>';
     } else {
-      h += '<div class="sa-meta"><span>👤 ' + esc(s.customerName || 'بدون اسم') + (s.customerPhone ? ' · ' + esc(s.customerPhone) : '') + '</span><span>🕒 ' + esc(fmtDate(s.date || s.createdAt)) + '</span></div>';
+      h += '<div class="sa-meta"><span>👤 ' + esc(s.customerName || 'بدون اسم') + (s.customerPhone ? ' · ' + esc(s.customerPhone) : '') + '</span><span>🕒 ' + esc(fmtDate(s.date || s.createdAt)) + '</span>' + (num(s.due) > 0 && s.dueDate ? '<span>📅 السداد: ' + esc(s.dueDate) + '</span>' : '') + '</div>';
     }
     h += '<div class="sa-items">';
     items.forEach((it, i) => {
@@ -24114,9 +24168,21 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
         '<div class="sa-grid2"><label>الكمية<input type="number" inputmode="numeric" min="1" id="sa-ret-qty" value="1"></label><label>حالة الصنف<select id="sa-ret-working"><option value="1">شغال وصالح للبيع (يرجع للمخزون)</option><option value="0">مش شغال (لا يرجع للمخزون)</option></select></label></div>' +
         '<button type="button" class="sa-btn sa-btn-main" data-sa-ret-confirm>تأكيد المرتجع</button></div>';
     }
+    if (cur.panel === 'add') {
+      h += '<div class="sa-panel" data-sn-scope><h4>إضافة صنف للفاتورة</h4><span class="sn-avail" hidden></span>' +
+        '<select data-f="type" hidden><option value="phone">جهاز</option><option value="accessory" selected>إكسسوار</option><option value="other">صنف آخر</option></select>' +
+        '<div class="sn-seg"><button type="button" data-type="phone">📱 جهاز</button><button type="button" data-type="accessory" class="on">🎧 إكسسوار</button><button type="button" data-type="other">📦 صنف آخر</button></div>' +
+        '<div class="sn-f sn-rel"><label>اسم المنتج</label><input data-f="name" data-suggest="product" autocomplete="off" placeholder="🔎 اكتب أول حروف الاسم"><div class="sn-suggest" hidden></div></div>' +
+        '<div class="sn-f" data-serial-field hidden><label>السيريال / IMEI</label><input data-f="serial" autocomplete="off" placeholder="🔢 السيريال أو IMEI"></div>' +
+        '<div class="sa-grid2"><div class="sn-f"><label>الكمية</label><div class="sn-step"><button type="button" data-step="1">＋</button><input type="number" data-f="qty" min="1" step="1" value="1" inputmode="numeric"><button type="button" data-step="-1">−</button></div></div>' +
+        '<div class="sn-f"><label>سعر القطعة</label><input type="number" data-f="price" min="0" step="0.01" inputmode="decimal" placeholder="💰 السعر"></div></div>' +
+        '<div class="sn-line"><span>إجمالي الصنف</span><b data-line-total>0 ج</b></div>' +
+        '<p class="sa-hint">الصنف بيتخصم من مكانه: الجهاز من بيع التلفونات، والإكسسوار من مخزونه. وبيتسجل في سجل الفاتورة.</p>' +
+        '<button type="button" class="sa-btn sa-btn-main" data-sa-add-confirm>تأكيد إضافة الصنف</button></div>';
+    }
     h += '<div class="sa-actions">';
     if (edit) h += '<button type="button" class="sa-btn sa-btn-main" data-sa-save>💾 حفظ التعديلات</button><button type="button" class="sa-btn" data-sa-cancel-edit>إلغاء</button>';
-    else h += '<button type="button" class="sa-btn sa-btn-main" data-sa-edit>✏️ تعديل</button><button type="button" class="sa-btn" data-sa-panel="pay">💵 تسجيل دفعة</button><button type="button" class="sa-btn" data-sa-panel="return">↩️ مرتجع</button><button type="button" class="sa-btn" data-sa-print>🖨️ طباعة</button>';
+    else h += '<button type="button" class="sa-btn sa-btn-main" data-sa-edit>✏️ تعديل</button><button type="button" class="sa-btn" data-sa-panel="add">➕ إضافة صنف</button><button type="button" class="sa-btn" data-sa-panel="pay">💵 تسجيل دفعة</button><button type="button" class="sa-btn" data-sa-panel="return">↩️ مرتجع</button><button type="button" class="sa-btn" data-sa-print>🖨️ طباعة</button>';
     h += '</div>';
     const log = logOf(s);
     h += '<div class="sa-log"><h4>سجل الفاتورة</h4>' + (log.length ? log.map(e => '<div class="sa-log-row"><i></i><div><span>' + esc(e.t) + '</span><small>' + esc(fmtDate(e.d)) + '</small></div></div>').join('') : '<p class="sa-hint">لا يوجد سجل.</p>') + '</div>';
@@ -24201,6 +24267,12 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
       API().update(s.id, function (x) { x.paid = num(x.paid) + amt; x.due = Math.max(0, num(x.total) - x.paid); x.payments = [{ amount: amt, date: new Date().toISOString() }].concat(x.payments || []); });
       cur.panel = null; cur.error = ''; renderModal(); alert('تم تسجيل دفعة ' + money(amt)); return;
     }
+    if (t.closest('[data-sa-add-confirm]')) {
+      const sc = t.closest('[data-sn-scope]'); const g = f => { const el = sc.querySelector('[data-f="' + f + '"]'); return el ? el.value : ''; };
+      const res = API().addItem(cur.id, { type: g('type'), name: g('name'), serial: g('serial'), quantity: g('qty'), unitPrice: g('price') });
+      if (!res.ok) { cur.error = res.error; renderModal(); return; }
+      cur.panel = null; cur.error = ''; renderModal(); alert('تمت إضافة الصنف للفاتورة وخصمه من مكانه'); return;
+    }
     if (t.closest('[data-sa-ret-confirm]')) {
       const s = findSale(cur.id); const sel = $('sa-ret-item'); const idx = Number(sel.value); const max = Number(sel.options[sel.selectedIndex].getAttribute('data-max'));
       const qty = Number($('sa-ret-qty').value); const working = $('sa-ret-working').value === '1';
@@ -24243,6 +24315,13 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
       if (s) openModal(s.id);
     }
   }, true);
+  window.actSalesAccountsUI = {
+    openInvoice: function (id) { openModal(id); },
+    showCustomer: function (name, phone) {
+      openKey = String(phone || '').trim() ? 'p:' + String(phone).trim() : 'n:' + String(name || '').trim().toLowerCase();
+      const card = document.querySelector('.independent-sales-card[data-sales-view="customers"]'); if (card) card.click();
+    }
+  };
   document.addEventListener('input', function (e) {
     if (e.target && e.target.id === 'sa-customer-search') {
       search = e.target.value; const pos = e.target.selectionStart; renderCustomers();
@@ -24289,6 +24368,7 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
       '<div><b>العميل:</b> ' + esc(s.customerName || '-') + (s.customerPhone ? ' &nbsp; <b>الهاتف:</b> ' + esc(s.customerPhone) : '') + '</div>' +
       '<table><thead><tr><th>#</th><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>' + rows + '</tbody></table>' +
       '<table class="tot"><tr><td>الإجمالي قبل الخصم</td><td>' + fmt(s.price) + '</td></tr>' + (num(s.discount) ? '<tr><td>الخصم</td><td>' + fmt(s.discount) + '</td></tr>' : '') + '<tr><td>الإجمالي</td><td><b>' + fmt(s.total) + '</b></td></tr><tr><td>المدفوع</td><td class="ok">' + fmt(s.paid) + '</td></tr><tr><td>المتبقي</td><td class="due">' + fmt(s.due) + '</td></tr></table>' +
+      (num(s.due) > 0 && s.dueDate ? '<p class="muted">موعد السداد: ' + esc(s.dueDate) + '</p>' : '') +
       (s.notes ? '<p class="muted">ملاحظات: ' + esc(s.notes) + '</p>' : '');
   }
   function statementBody(key){
@@ -24301,6 +24381,7 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
       '<table><thead><tr><th>الفاتورة</th><th>التاريخ</th><th>الأصناف</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th></tr></thead><tbody>' + inv + '</tbody></table>' +
       '<table class="tot"><tr><td>إجمالي الفواتير</td><td><b>' + fmt(total) + '</b></td></tr><tr><td>إجمالي المدفوع</td><td class="ok">' + fmt(paid) + '</td></tr><tr><td>إجمالي المتبقي</td><td class="due">' + fmt(due) + '</td></tr></table>';
   }
+  window.actSalesPrint = { invoice: function (s) { printHtml('فاتورة ' + s.invoiceNumber, invoiceBody(s)); }, statement: function (key) { const b = statementBody(key); if (b) printHtml('كشف حساب', b); } };
   document.addEventListener('click', function (e) {
     const t = e.target; if (!t || !t.closest) return;
     const pr = t.closest('[data-sa-print]');
@@ -24313,4 +24394,267 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
     const st = t.closest('[data-sa-statement]');
     if (st) { e.preventDefault(); e.stopImmediatePropagation(); const body = statementBody(st.getAttribute('data-sa-statement')); if (body) printHtml('كشف حساب', body); }
   }, true);
+})();
+
+/* =========================================================
+   ACT NEW SALE UX
+   Stock suggestions (so nothing has to be typed in full), customer balance,
+   quick payment buttons, due date, print / WhatsApp after save.
+   Stock deduction itself is done by the existing save flow (phones leave
+   Devices > Phone Sales, accessories leave Accessories stock).
+========================================================= */
+(function actNewSaleUX(){
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const API = () => window.actPhoneManagerSales;
+  const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const fmt = v => (Math.round(num(v) * 100) / 100).toLocaleString('en-US');
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const norm = v => String(v == null ? '' : v).trim().toLocaleLowerCase('ar');
+  const fire = (el, type) => el && el.dispatchEvent(new Event(type, { bubbles: true }));
+  const view = () => $('sales-view-new');
+
+  /* ---------- data ---------- */
+  function phonesForSale(){
+    try {
+      return (Array.isArray(devices) ? devices : [])
+        .filter(r => r.section === 'sale' || r.category === SECTIONS.SALE || r.status === 'البيع')
+        .map(r => ({ kind: 'phone', name: String(r.phoneName || r.productName || r.name || '').trim(), serial: String(r.serialNumber || r.serial || '').trim(), price: num(r.price) || num(r.phonePrice) }))
+        .filter(x => x.name || x.serial);
+    } catch (_) { return []; }
+  }
+  function accessoriesList(){
+    try { return (window.actAccessoryList ? window.actAccessoryList() : []).map(a => ({ kind: 'accessory', name: String(a.name || '').trim(), qty: num(a.quantity), price: num(a.price), code: String(a.code || '') })).filter(x => x.name); } catch (_) { return []; }
+  }
+  function customerIndex(){
+    const map = new Map();
+    (API() ? API().getAll() : []).forEach(s => {
+      const name = String(s.customerName || '').trim(), phone = String(s.customerPhone || '').trim();
+      if (!name && !phone) return;
+      const key = phone ? 'p:' + phone : 'n:' + name.toLowerCase();
+      if (!map.has(key)) map.set(key, { key, name: '', phone: '', due: 0, sales: [] });
+      const g = map.get(key);
+      if (!g.name && name) g.name = name;
+      if (!g.phone && phone) g.phone = phone;
+      g.due += num(s.due); g.sales.push(s);
+    });
+    map.forEach(g => g.sales.sort((a, b) => String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || ''))));
+    return [...map.values()];
+  }
+  function currentCustomer(){
+    const name = norm($('sale-customer') && $('sale-customer').value), phone = String(($('sale-phone') && $('sale-phone').value) || '').trim();
+    if (!name && !phone) return null;
+    const all = customerIndex();
+    return all.find(g => phone && g.phone === phone) || all.find(g => name && norm(g.name) === name) || null;
+  }
+
+  /* ---------- scopes (item cards) ---------- */
+  function typeOf(scope){ const t = scope.querySelector('[data-f="type"]'); return t ? t.value : 'phone'; }
+  function setType(scope, type, silent){
+    const sel = scope.querySelector('[data-f="type"]'); if (!sel) return;
+    sel.value = type;
+    scope.querySelectorAll('.sn-seg button[data-type]').forEach(b => b.classList.toggle('on', b.dataset.type === type));
+    const serialBox = scope.querySelector('[data-serial-field]');
+    if (serialBox) {
+      serialBox.hidden = type !== 'phone';
+      if (type !== 'phone') { const sr = scope.querySelector('[data-f="serial"]'); if (sr) sr.value = ''; }
+    }
+    if (!silent) fire(sel, 'change');
+  }
+  function field(scope, f){ return scope.querySelector('[data-f="' + f + '"]'); }
+  function setField(scope, f, v){ const el = field(scope, f); if (el) { el.value = v; fire(el, 'input'); } }
+  function refreshScope(scope){
+    const type = typeOf(scope);
+    scope.querySelectorAll('.sn-seg button[data-type]').forEach(b => b.classList.toggle('on', b.dataset.type === type));
+    const serialBox = scope.querySelector('[data-serial-field]'); if (serialBox) serialBox.hidden = type !== 'phone';
+    const qty = Math.max(0, Math.floor(num(field(scope, 'qty') && field(scope, 'qty').value))), price = num(field(scope, 'price') && field(scope, 'price').value);
+    const line = scope.querySelector('[data-line-total]'); if (line) line.textContent = fmt(qty * price) + ' ج';
+    const badge = scope.querySelector('.sn-avail'); if (!badge) return;
+    const name = String((field(scope, 'name') || {}).value || '').trim(), serial = String((field(scope, 'serial') || {}).value || '').trim();
+    let text = '', cls = '';
+    if (name && type === 'accessory') {
+      const hit = accessoriesList().find(a => norm(a.name) === norm(name));
+      if (!hit) { text = 'مش موجود في الإكسسوارات'; cls = 'warn'; }
+      else if (qty > hit.qty) { text = 'المتاح ' + hit.qty + ' فقط'; cls = 'warn'; }
+      else { text = 'متاح ' + hit.qty + ' قطعة'; cls = 'ok'; }
+    } else if ((name || serial) && type === 'phone') {
+      const list = phonesForSale();
+      const hits = serial ? list.filter(p => p.serial === serial) : list.filter(p => norm(p.name) === norm(name));
+      if (!hits.length) { text = 'مش في بيع التلفونات'; cls = 'warn'; }
+      else { text = serial ? 'موجود في بيع التلفونات' : 'متاح ' + hits.length + ' في بيع التلفونات'; cls = qty > hits.length ? 'warn' : 'ok'; if (qty > hits.length) text = 'المتاح ' + hits.length + ' فقط'; }
+    }
+    badge.hidden = !text; badge.textContent = text; badge.className = 'sn-avail' + (cls ? ' ' + cls : '');
+  }
+
+  /* ---------- suggestions ---------- */
+  function boxOf(input){
+    let b = input.parentElement && input.parentElement.querySelector('.sn-suggest');
+    if (!b) { b = document.createElement('div'); b.className = 'sn-suggest'; b.hidden = true; input.after(b); }
+    return b;
+  }
+  function hideSuggest(except){ document.querySelectorAll('.sn-suggest').forEach(b => { if (b !== except) b.hidden = true; }); }
+  function showSuggest(input){
+    const kind = input.dataset.suggest; const q = norm(input.value); const box = boxOf(input);
+    let items = [];
+    if (kind === 'product') {
+      items = phonesForSale().concat(accessoriesList()).filter(x => !q || norm(x.name).includes(q) || norm(x.serial).includes(q) || norm(x.code).includes(q)).slice(0, 7);
+      box._items = items;
+      box.innerHTML = items.map((x, i) => '<button type="button" class="sn-sg" data-sg="' + i + '"><span class="sn-sg-ic">' + (x.kind === 'phone' ? '📱' : '🎧') + '</span><span class="sn-sg-main"><b>' + esc(x.name) + '</b><small>' + (x.kind === 'phone' ? esc(x.serial || 'بدون سيريال') : 'متاح ' + x.qty) + '</small></span><span class="sn-sg-price">' + (x.price ? fmt(x.price) + ' ج' : '') + '</span></button>').join('');
+    } else {
+      const phoneQ = String(input.value || '').trim();
+      items = customerIndex().filter(g => !q || norm(g.name).includes(q) || (phoneQ && g.phone.includes(phoneQ))).sort((a, b) => b.due - a.due).slice(0, 6);
+      box._items = items;
+      box.innerHTML = items.map((g, i) => '<button type="button" class="sn-sg" data-sg="' + i + '"><span class="sn-sg-ic">👤</span><span class="sn-sg-main"><b>' + esc(g.name || g.phone) + '</b><small>' + esc(g.phone || 'بدون رقم') + '</small></span><span class="sn-sg-price' + (g.due > 0 ? ' bad' : '') + '">' + (g.due > 0 ? 'عليه ' + fmt(g.due) : 'مسدد') + '</span></button>').join('');
+    }
+    hideSuggest(box); box.hidden = !items.length;
+  }
+  function pick(box, index){
+    const item = (box._items || [])[index]; if (!item) return;
+    const input = box.parentElement.querySelector('[data-suggest]');
+    if (input.dataset.suggest === 'product') {
+      const scope = input.closest('[data-sn-scope]'); if (!scope) return;
+      setType(scope, item.kind);
+      setField(scope, 'name', item.name);
+      setField(scope, 'serial', item.kind === 'phone' ? item.serial : '');
+      if (item.price > 0) setField(scope, 'price', item.price);
+      const q = field(scope, 'qty'); if (q && !num(q.value)) setField(scope, 'qty', 1);
+      if (item.kind === 'phone' && item.serial) setField(scope, 'qty', 1);
+    } else {
+      if ($('sale-customer')) { $('sale-customer').value = item.name || ''; fire($('sale-customer'), 'input'); }
+      if ($('sale-phone')) { $('sale-phone').value = item.phone || ''; fire($('sale-phone'), 'input'); }
+    }
+    box.hidden = true; later();
+  }
+
+  /* ---------- sync the whole screen ---------- */
+  let prefsLoaded = false;
+  function sync(){
+    const root = view(); if (!root || !API()) return;
+    root.querySelectorAll('[data-sn-scope]').forEach(refreshScope);
+    const v = API().getNewSaleValues();
+    const set = (id, t) => { const e = $(id); if (e) e.textContent = t; };
+    set('sn-t-items', String(v.items.length)); set('sn-t-total', fmt(v.total)); set('sn-t-paid', fmt(v.paid)); set('sn-t-due', fmt(v.due));
+    set('new-sale-invoice-number', '#' + API().nextInvoiceNumber());
+    const method = $('sale-payment-method') && $('sale-payment-method').value;
+    root.querySelectorAll('#sn-method-chips [data-method]').forEach(b => b.classList.toggle('on', b.dataset.method === method));
+    const dueField = $('sn-due-field'); if (dueField) dueField.hidden = !(v.due > 0);
+    const cust = currentCustomer(); const bal = $('sn-balance'), tools = $('sn-customer-tools'), after = $('sn-after');
+    if (bal) {
+      if (cust) {
+        const last = cust.sales[0]; const days = last ? Math.max(0, Math.floor((Date.now() - new Date(last.date || last.createdAt).getTime()) / 86400000)) : 0;
+        bal.hidden = false; bal.className = 'sn-balance' + (cust.due > 0 ? ' bad' : ' ok');
+        bal.innerHTML = cust.due > 0
+          ? '<span>⚠️</span><div><b>عليه من قبل ' + fmt(cust.due) + ' جنيه</b><small>آخر فاتورة #' + esc(last.invoiceNumber) + ' · من ' + days + ' يوم</small></div>'
+          : '<span>✅</span><div><b>حسابه مسدد</b><small>' + cust.sales.length + ' فاتورة سابقة · آخرها #' + esc(last.invoiceNumber) + '</small></div>';
+      } else bal.hidden = true;
+    }
+    if (tools) tools.hidden = !cust;
+    if (after) {
+      if (cust && cust.due > 0 && v.due > 0) { after.hidden = false; after.innerHTML = 'إجمالي اللي عليه بعد الفاتورة دي: <b>' + fmt(cust.due + v.due) + ' جنيه</b> (' + fmt(cust.due) + ' سابق + ' + fmt(v.due) + ' جديد)'; }
+      else after.hidden = true;
+    }
+    if (!prefsLoaded) {
+      prefsLoaded = true;
+      try { if ($('sn-print-after')) $('sn-print-after').checked = localStorage.getItem('actSnPrintAfter') === '1'; if ($('sn-wa-after')) $('sn-wa-after').checked = localStorage.getItem('actSnWaAfter') === '1'; } catch (_) {}
+    }
+  }
+  let timer = 0;
+  function later(){ clearTimeout(timer); timer = setTimeout(sync, 0); }
+
+  /* ---------- events ---------- */
+  document.addEventListener('input', function (e) {
+    const t = e.target; if (!t || !t.closest) return;
+    if (t.matches && t.matches('[data-suggest]')) showSuggest(t);
+    const sc = t.closest('[data-sn-scope]'); if (sc) refreshScope(sc);
+    if (t.closest('#sales-view-new')) later();
+  });
+  document.addEventListener('focusin', function (e) { const t = e.target; if (t && t.matches && t.matches('[data-suggest]')) showSuggest(t); });
+  document.addEventListener('change', function (e) {
+    const t = e.target; if (!t || !t.closest) return;
+    if (t.id === 'sn-print-after') try { localStorage.setItem('actSnPrintAfter', t.checked ? '1' : '0'); } catch (_) {}
+    if (t.id === 'sn-wa-after') try { localStorage.setItem('actSnWaAfter', t.checked ? '1' : '0'); } catch (_) {}
+    if (t.closest('#sales-view-new')) later();
+  });
+  document.addEventListener('mousedown', function (e) {
+    const sg = e.target && e.target.closest && e.target.closest('.sn-sg');
+    if (sg) { e.preventDefault(); pick(sg.parentElement, Number(sg.dataset.sg)); return; }
+    if (!(e.target.closest && e.target.closest('.sn-rel'))) hideSuggest(null);
+  });
+  document.addEventListener('touchstart', function (e) {
+    const sg = e.target && e.target.closest && e.target.closest('.sn-sg');
+    if (sg) { e.preventDefault(); pick(sg.parentElement, Number(sg.dataset.sg)); }
+  }, { passive: false });
+
+  document.addEventListener('click', function (e) {
+    const t = e.target; if (!t || !t.closest) return;
+
+    const seg = t.closest('.sn-seg button[data-type]');
+    if (seg) { const scope = seg.closest('[data-sn-scope]'); if (scope) { setType(scope, seg.dataset.type); refreshScope(scope); later(); } return; }
+
+    const step = t.closest('.sn-step button[data-step]');
+    if (step) {
+      const input = step.parentElement.querySelector('input'); const scope = step.closest('[data-sn-scope]');
+      let next = Math.max(1, Math.floor(num(input.value) || 1) + Number(step.dataset.step));
+      if (scope && typeOf(scope) === 'phone' && String((field(scope, 'serial') || {}).value || '').trim()) next = 1;
+      input.value = next; fire(input, 'input'); if (scope) refreshScope(scope); later(); return;
+    }
+
+    if (!t.closest('#sales-view-new')) {
+      if (t.closest('.independent-sales-card[data-sales-view="new"],#home-sales,#nav-sales')) { later(); setTimeout(sync, 350); }
+      return;
+    }
+    const m = t.closest('[data-method]');
+    if (m) { const sel = $('sale-payment-method'); if (sel) { sel.value = m.dataset.method; fire(sel, 'change'); } later(); return; }
+
+    const pay = t.closest('[data-pay]');
+    if (pay) {
+      const v = API().getNewSaleValues(); const paid = $('sale-paid'); if (!paid) return;
+      const kind = pay.dataset.pay;
+      paid.value = kind === 'all' ? v.total : kind === 'half' ? Math.round(v.total / 2) : 0;
+      if (kind === 'none') { const sel = $('sale-payment-method'); if (sel) { sel.value = 'credit'; fire(sel, 'change'); } }
+      fire(paid, 'input'); later(); return;
+    }
+    const disc = t.closest('[data-disc]');
+    if (disc) { const v = API().getNewSaleValues(); const d = $('sale-discount'); if (d) { d.value = Math.round(v.price * Number(disc.dataset.disc)) / 100; fire(d, 'input'); } later(); return; }
+
+    const dd = t.closest('[data-due-days]');
+    if (dd) { const d = new Date(Date.now() + Number(dd.dataset.dueDays) * 86400000); const inp = $('sale-due-date'); if (inp) { inp.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); fire(inp, 'change'); } return; }
+
+    if (t.closest('#sn-open-account')) {
+      const c = currentCustomer();
+      if (c && window.actSalesAccountsUI) window.actSalesAccountsUI.showCustomer(c.name, c.phone);
+      return;
+    }
+    if (t.closest('#sn-repeat-last')) {
+      const c = currentCustomer(); if (!c || !c.sales.length) return;
+      const items = (c.sales[0].items || []).filter(i => i.type !== 'phone');
+      if (!items.length) { alert('آخر فاتورة كلها أجهزة بسيريال. اختار الجهاز من القائمة.'); return; }
+      const first = view().querySelector('[data-sn-scope]');
+      const fill = (scope, it) => { setType(scope, it.type === 'accessory' ? 'accessory' : 'other'); setField(scope, 'name', it.name || ''); setField(scope, 'qty', it.quantity || 1); setField(scope, 'price', it.unitPrice != null ? it.unitPrice : (it.price || 0)); };
+      if (!String((field(first, 'name') || {}).value || '').trim()) fill(first, items.shift());
+      items.forEach(it => { $('sale-add-item-button').click(); const rows = view().querySelectorAll('#sale-extra-items [data-sn-scope]'); fill(rows[rows.length - 1], it); });
+      later(); return;
+    }
+  });
+
+  window.addEventListener('act-sales-data-updated', later);
+  window.addEventListener('act-user-data-ready', later);
+  document.addEventListener('DOMContentLoaded', function () { setTimeout(sync, 700); });
+
+  /* ---------- after a sale is saved ---------- */
+  function waLink(sale){
+    let phone = String(sale.customerPhone || '').replace(/\D/g, ''); if (!phone) return '';
+    if (phone.startsWith('00')) phone = phone.slice(2); else if (phone.startsWith('0')) phone = '20' + phone.slice(1);
+    const lines = ['فاتورة #' + sale.invoiceNumber, (sale.items || []).map(i => '• ' + (i.name || '') + ' × ' + (i.quantity || 1) + ' = ' + fmt(num(i.quantity || 1) * num(i.unitPrice != null ? i.unitPrice : i.price))).join('\n'), 'الإجمالي: ' + fmt(sale.total) + ' جنيه', 'المدفوع: ' + fmt(sale.paid) + ' جنيه', 'المتبقي: ' + fmt(sale.due) + ' جنيه'];
+    return 'https://wa.me/' + phone + '?text=' + encodeURIComponent(lines.filter(Boolean).join('\n'));
+  }
+  window.addEventListener('act-sale-saved', function (e) {
+    const id = e.detail && e.detail.id; const sale = (API() ? API().getAll() : []).find(s => String(s.id) === String(id)); if (!sale) return;
+    const wantPrint = $('sn-print-after') && $('sn-print-after').checked, wantWa = $('sn-wa-after') && $('sn-wa-after').checked;
+    const card = document.querySelector('.independent-sales-card[data-sales-view="customers"]'); if (card) card.click();
+    if (window.actSalesAccountsUI) window.actSalesAccountsUI.openInvoice(sale.id);
+    if (wantPrint && window.actSalesPrint) window.actSalesPrint.invoice(sale);
+    if (wantWa) { const link = waLink(sale); if (link) { try { window.open(link, '_blank'); } catch (_) {} } else alert('اكتب رقم العميل عشان يتبعتله واتساب.'); }
+    later();
+  });
 })();
