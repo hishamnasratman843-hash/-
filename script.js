@@ -5879,11 +5879,11 @@ devicePhotoInput?.addEventListener("change", function () {
         const img = new Image();
         img.onload = () => {
             const canvas = document.createElement("canvas");
-            const scale = Math.min(1, 1000 / Math.max(img.width, img.height));
+            const scale = Math.min(1, 720 / Math.max(img.width, img.height));
             canvas.width = Math.round(img.width * scale);
             canvas.height = Math.round(img.height * scale);
             canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-            devicePhotoInput.dataset.imageData = canvas.toDataURL("image/jpeg", 0.78);
+            devicePhotoInput.dataset.imageData = canvas.toDataURL("image/jpeg", 0.62);
             if (devicePhotoPreview) { devicePhotoPreview.src = devicePhotoInput.dataset.imageData; devicePhotoPreview.style.display = "block"; }
         };
         img.src = reader.result;
@@ -18771,11 +18771,11 @@ purchaseTab.addEventListener(
             const img = new Image();
             img.onload = () => {
                 const canvas = document.createElement("canvas");
-                const scale = Math.min(1, 1000 / Math.max(img.width, img.height));
+                const scale = Math.min(1, 720 / Math.max(img.width, img.height));
                 canvas.width = Math.round(img.width * scale);
                 canvas.height = Math.round(img.height * scale);
                 canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-                this.dataset.imageData = canvas.toDataURL("image/jpeg", 0.78);
+                this.dataset.imageData = canvas.toDataURL("image/jpeg", 0.62);
                 if (purchasePhotoPreview) { purchasePhotoPreview.src = this.dataset.imageData; purchasePhotoPreview.style.display = "block"; }
             };
             img.src = reader.result;
@@ -23649,6 +23649,7 @@ if ("serviceWorker" in navigator) {
   window.actAccessoryConsumeSale=consumeAccessorySale;
   window.actAccessoryList=function(){try{return read().map(x=>({id:x.id,name:x.name||'',code:x.code||'',quantity:Number(x.quantity)||0,price:Number(x.price)||0}));}catch(e){return [];}};
   window.actAccessoryRestoreSale=restoreAccessorySale;
+  window.actAccessoryStore={read:read,save:save,readMovements:()=>readKey(movementsKey()),saveMovements:rows=>saveKey(movementsKey(),rows),notify:notify,render:renderAccessories};
 
   function readArrayFor(type){const key=typeof getUserKey==='function'?getUserKey(type):`actPhoneManager_${type}_guest`;return readKey(key);}
   function money(value){return Number(value||0).toLocaleString('ar-EG',{maximumFractionDigits:2});}
@@ -24715,6 +24716,24 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
     });
   }
 
+  /* ---------- IndexedDB image store: photos never touch the 5MB localStorage quota ---------- */
+  const imgDB = (function () {
+    let dbp = null; const cache = new Map();
+    function open(){ if (dbp) return dbp; dbp = new Promise((res, rej) => { try { const r = indexedDB.open('act-images', 1); r.onupgradeneeded = () => r.result.createObjectStore('img'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } }); return dbp; }
+    async function put(data){
+      const id = 'idb:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      try { const db = await open(); await new Promise((res, rej) => { const tx = db.transaction('img', 'readwrite'); tx.objectStore('img').put(data, id); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); cache.set(id, data); return id; } catch (_) { return data; }
+    }
+    async function get(ref){
+      if (!ref) return ''; if (!String(ref).startsWith('idb:')) return ref; if (cache.has(ref)) return cache.get(ref);
+      try { const db = await open(); const v = await new Promise((res, rej) => { const q = db.transaction('img').objectStore('img').get(ref); q.onsuccess = () => res(q.result || ''); q.onerror = () => rej(q.error); }); if (v) cache.set(ref, v); return v; } catch (_) { return ''; }
+    }
+    async function del(ref){ if (!ref || !String(ref).startsWith('idb:')) return; cache.delete(ref); try { const db = await open(); db.transaction('img', 'readwrite').objectStore('img').delete(ref); } catch (_) {} }
+    return { put, get, del };
+  })();
+  function hydrate(root){ (root || document).querySelectorAll('img[data-ref]').forEach(async img => { const v = await imgDB.get(img.dataset.ref); if (v) img.src = v; }); }
+  window.actImgDB = imgDB; window.actHydrateImages = hydrate; window.actReadImage = readImage;
+
   /* ---------- state of the two forms ---------- */
   const st = { used: blank('used'), new: blank('new') };
   const filt = { used: { q: '', s: 'all' }, new: { q: '', s: 'all' } };
@@ -24816,9 +24835,43 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
     let anchor = purchases;
     ['used', 'new'].forEach(kind => { const sec = document.createElement('div'); sec.id = KIND[kind].sec; sec.className = 'dv-sec'; sec.style.display = 'none'; sec.innerHTML = sectionHtml(kind); anchor.after(sec); anchor = sec; $('dv-form-' + kind).innerHTML = formHtml(kind); });
     regroupForms();
+    paintExtra('device'); paintExtra('purchase');
     injectIdPickers();
     const modal = document.createElement('div'); modal.id = 'dv-id-modal'; modal.className = 'dv-modal'; modal.hidden = true; modal.innerHTML = '<div class="dv-sheet"></div>'; document.body.appendChild(modal);
     refreshAll();
+  }
+
+  /* ---------- same spec fields as used/new devices for the sale + purchase tabs ---------- */
+  const DKEY = () => 'actPhoneManager_phonedetails_' + uid();
+  const detMap = () => readMap(DKEY());
+  const saveDet = m => write(DKEY(), m);
+  const xst = { device: { grade: '', acc: [] }, purchase: { grade: '', acc: [] } };
+  const XACC = ['📦 كرتونة', '🔌 شاحن', '🔗 وصلة / كابل', '🎧 سماعة', '📃 فاتورة', '🛡️ جراب'];
+  function extraHtml(form){
+    const xf = (label, k, ph, type, attr) => '<div class="dv-f"><label>' + label + '</label><input data-x="' + k + '" type="' + (type || 'text') + '" placeholder="' + esc(ph) + '" ' + (attr || '') + ' autocomplete="off"></div>';
+    return '<div class="dv-xhead">🔧 مواصفات الجهاز</div>' +
+      (form === 'device' ? xf('سيريال / IMEI', 'imei', '🔢 السيريال أو IMEI', 'text', 'inputmode="numeric"') : '') +
+      '<div class="dv-r2">' + xf('السعة', 'storage', '128GB') + xf('اللون', 'color', '🎨 اللون') + '</div>' +
+      '<div class="dv-f"><label>حالة الجهاز</label><div class="dv-chips">' + GRADES.map(g => '<button type="button" class="dv-ch" data-xg="' + form + '" data-val="' + g + '">' + g + '</button>').join('') + '</div></div>' +
+      '<div class="dv-r2">' + xf('صحة البطارية %', 'battery', '🔋 مثال: 91', 'number', 'min="0" max="100" inputmode="numeric"') + xf('الضمان', 'warranty', '🛡️ بدون') + '</div>' +
+      '<div class="dv-f"><label>المرفقات (شاحن / وصلة / ...)</label><div class="dv-chips">' + XACC.map(a => '<button type="button" class="dv-ch" data-xa="' + form + '" data-val="' + a + '">' + a + '</button>').join('') + '</div></div>';
+  }
+  function paintExtra(form){
+    const box = $('dv-extra-' + form); if (!box) return; const x = xst[form];
+    box.querySelectorAll('[data-xg]').forEach(b => b.classList.toggle('on', b.dataset.val === x.grade));
+    box.querySelectorAll('[data-xa]').forEach(b => b.classList.toggle('on', x.acc.includes(b.dataset.val)));
+  }
+  function readExtras(form){
+    const box = $('dv-extra-' + form); const o = {}; if (!box) return o;
+    box.querySelectorAll('[data-x]').forEach(el => { const v = String(el.value || '').trim(); if (v) o[el.dataset.x] = v; });
+    if (xst[form].grade) o.grade = xst[form].grade; if (xst[form].acc.length) o.accessories = xst[form].acc.slice();
+    return o;
+  }
+  function resetExtras(form){ xst[form] = { grade: '', acc: [] }; const box = $('dv-extra-' + form); if (box) box.querySelectorAll('[data-x]').forEach(el => { el.value = ''; }); paintExtra(form); }
+  function fillExtras(form, key){
+    resetExtras(form); const d = detMap()[key]; if (!d) return; const box = $('dv-extra-' + form); if (!box) return;
+    box.querySelectorAll('[data-x]').forEach(el => { if (d[el.dataset.x] != null) el.value = d[el.dataset.x]; });
+    xst[form].grade = d.grade || ''; xst[form].acc = (d.accessories || []).slice(); paintExtra(form);
   }
 
   /* ---------- re-arrange the existing sale / purchase forms into cards (same fields, same ids) ---------- */
@@ -24828,7 +24881,7 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
     const made = [];
     cards.forEach(c => {
       const card = document.createElement('div'); card.className = 'dv-card';
-      card.innerHTML = '<div class="dv-ch-h"><span class="dv-ci" style="background:' + c.grad + '">' + c.icon + '</span><div><strong>' + c.title + '</strong><small>' + c.sub + '</small></div></div><div class="dv-grid"></div>' + (c.slot ? '<div id="dv-id-slot-' + c.slot + '"></div>' : '');
+      card.innerHTML = '<div class="dv-ch-h"><span class="dv-ci" style="background:' + c.grad + '">' + c.icon + '</span><div><strong>' + c.title + '</strong><small>' + c.sub + '</small></div></div><div class="dv-grid"></div>' + (c.slot ? '<div id="dv-id-slot-' + c.slot + '"></div>' : '') + (c.x ? '<div class="dv-extra" id="dv-extra-' + c.x + '">' + extraHtml(c.x) + '</div>' : '');
       const grid = card.querySelector('.dv-grid');
       c.ids.forEach(id => { const el = $(id); const g = el && el.closest('.form-group'); if (g) grid.appendChild(g); });
       made.push(card);
@@ -24840,12 +24893,12 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
   }
   function regroupForms(){
     regroup('device-form', [
-      { icon: '📱', grad: 'linear-gradient(135deg,#2563eb,#38bdf8)', title: 'بيانات الجهاز', sub: 'الاسم والعيب والكرتونة', ids: ['phone-name', 'problem', 'changed-parts'] },
+      { icon: '📱', grad: 'linear-gradient(135deg,#2563eb,#38bdf8)', title: 'بيانات الجهاز', sub: 'الاسم والعيب والكرتونة والمواصفات', ids: ['phone-name', 'problem', 'changed-parts'], x: 'device' },
       { icon: '👤', grad: 'linear-gradient(135deg,#7c3aed,#c084fc)', title: 'صاحب الجهاز', sub: 'الاسم وموعد الاستلام وصورة البطاقة', ids: ['customer-name', 'receive-date', 'receive-time'], slot: 'device' },
       { icon: '💰', grad: 'linear-gradient(135deg,#ea580c,#fbbf24)', title: 'السعر والصور', sub: 'سعر الجهاز وصورته وملاحظاتك', ids: ['price', 'device-photo-input', 'notes'] }
     ]);
     regroup('phone-purchase-form', [
-      { icon: '📱', grad: 'linear-gradient(135deg,#2563eb,#38bdf8)', title: 'بيانات الجهاز', sub: 'الاسم والسيريال والكرتونة', ids: ['purchase-phone-name', 'purchase-serial', 'purchase-box-included'] },
+      { icon: '📱', grad: 'linear-gradient(135deg,#2563eb,#38bdf8)', title: 'بيانات الجهاز', sub: 'الاسم والسيريال والكرتونة والمواصفات', ids: ['purchase-phone-name', 'purchase-serial', 'purchase-box-included'], x: 'purchase' },
       { icon: '👤', grad: 'linear-gradient(135deg,#7c3aed,#c084fc)', title: 'بيانات البائع', sub: 'اللي اشتريت منه وصورة بطاقته', ids: ['purchase-seller-name', 'purchase-seller-phone'], slot: 'purchase' },
       { icon: '💰', grad: 'linear-gradient(135deg,#ea580c,#fbbf24)', title: 'السعر والصور', sub: 'سعر الشراء والتاريخ والصورة', ids: ['purchase-price', 'purchase-date', 'purchase-device-photo', 'purchase-notes'] }
     ]);
@@ -24875,7 +24928,7 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
   }
   function setIdPreview(slot, src){
     const prev = slot.querySelector('.dv-idprev'); if (!prev) return;
-    prev.innerHTML = src ? '<img alt="" src="' + src + '">' : '<span>📷</span>'; slot.classList.toggle('has', !!src);
+    prev.innerHTML = src ? '<img alt="" data-ref="' + esc(src) + '">' : '<span>📷</span>'; slot.classList.toggle('has', !!src); if (src) hydrate(prev);
     const sm = slot.querySelector('small'); if (sm) sm.textContent = src ? 'اتصورت ✓ · اضغط للتغيير' : 'تصوير بالكاميرا أو من المعرض';
   }
   function resetPending(form){ pend[form] = { front: '', back: '' }; document.querySelectorAll('.dv-idpair[data-form="' + form + '"] [data-idslot]').forEach(s => setIdPreview(s, '')); }
@@ -24897,12 +24950,13 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
         ? [it.grade ? '<span class="dv-tag t-ok">' + esc(it.grade) + '</span>' : '', it.battery ? '<span class="dv-tag t-blue">بطارية ' + esc(it.battery) + '%</span>' : '', it.defects ? '<span class="dv-tag t-bad">' + esc(it.defects) + '</span>' : '', (it.accessories || []).some(a => a.includes('كرتونة')) ? '<span class="dv-tag t-gray">بكرتونة</span>' : '<span class="dv-tag t-gray">من غير كرتونة</span>']
         : ['<span class="dv-tag t-ok">' + esc(it.state || '') + '</span>', it.warranty ? '<span class="dv-tag t-blue">ضمان ' + esc(it.warranty) + '</span>' : '', '<span class="dv-tag t-gray">متبقي ' + remaining(it) + ' من ' + Math.max(1, Math.floor(num(it.qty) || 1)) + '</span>']).join('');
       const hasId = !!map['used:' + it.id];
-      return '<article class="dv-dev"><div class="dv-ph" style="background:' + KIND[kind].grad + '">' + (it.photos && it.photos[0] ? '<img alt="" src="' + it.photos[0] + '">' : '📱') + '</div><div class="dv-dm"><div class="dv-dtop"><b>' + esc(it.name) + (it.storage ? ' · ' + esc(it.storage) : '') + '</b>' + statusSel(it) + '</div><small>' + (it.imei ? 'IMEI ' + esc(it.imei) : 'بدون IMEI') + (it.color ? ' · ' + esc(it.color) : '') + '</small><div class="dv-tags">' + tags + '</div>' +
+      return '<article class="dv-dev"><div class="dv-ph" style="background:' + KIND[kind].grad + '">' + (it.photos && it.photos[0] ? '<img alt="" data-ref="' + esc(it.photos[0]) + '">' : '📱') + '</div><div class="dv-dm"><div class="dv-dtop"><b>' + esc(it.name) + (it.storage ? ' · ' + esc(it.storage) : '') + '</b>' + statusSel(it) + '</div><small>' + (it.imei ? 'IMEI ' + esc(it.imei) : 'بدون IMEI') + (it.color ? ' · ' + esc(it.color) : '') + '</small><div class="dv-tags">' + tags + '</div>' +
         '<div class="dv-prices"><span>شراء ' + fmt(it.buyPrice) + (kind === 'used' && it.sellerName ? ' · ' + esc(it.sellerName) : '') + (kind === 'new' && it.supplierName ? ' · ' + esc(it.supplierName) : '') + '</span><b>' + fmt(it.sellPrice) + ' ج</b></div><div class="dv-prices"><span>ربح</span><em class="' + (profit < 0 ? 'neg' : '') + '">' + (profit >= 0 ? '+ ' : '− ') + fmt(Math.abs(profit)) + ' ج' + (kind === 'new' && remaining(it) > 1 ? ' × ' + remaining(it) : '') + '</em></div>' +
         '<div class="dv-dact"><button type="button" data-dv-edit="' + kind + ':' + esc(it.id) + '">✏️ تعديل</button>' + (kind === 'used' ? '<button type="button" class="' + (hasId ? 'has' : '') + '" data-dv-idopen="used:' + esc(it.id) + '">🪪 البطاقة' + (hasId ? ' ✓' : '') + '</button>' : '') +
         ((it.listedIds || []).length && st1 !== 'sold' ? '<button type="button" class="on" data-dv-unlist="' + kind + ':' + esc(it.id) + '">✓ معروض للبيع</button>' : (st1 === 'sold' ? '' : '<button type="button" data-dv-list="' + kind + ':' + esc(it.id) + '">🛒 بيع</button>')) +
         '<button type="button" class="del" data-dv-del="' + kind + ':' + esc(it.id) + '" aria-label="حذف">🗑️</button></div></div></article>';
     }).join('');
+    hydrate(host);
   }
   function stats(){
     const box = $('dv-stats'); if (!box) return;
@@ -24924,10 +24978,10 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
   function paintForm(kind){
     const f = formEl(kind), s = st[kind];
     f.querySelectorAll('.dv-ch[data-grp]').forEach(b => { const g = b.dataset.grp; b.classList.toggle('on', g === 'acc' ? s.acc.includes(b.dataset.val) : s[g] === b.dataset.val); });
-    const ph = f.querySelector('[data-photos]'); if (ph) ph.innerHTML = s.photos.map((p, i) => '<div class="dv-pho"><img alt="" src="' + p + '"><button type="button" data-dv-rmphoto="' + i + '" aria-label="حذف">×</button></div>').join('') + (s.photos.length < 5 ? '<button type="button" class="dv-pho add" data-dv-pickphotos>＋</button>' : '');
-    const inv = f.querySelector('[data-invoice]'); if (inv) inv.innerHTML = (s.invoice ? '<div class="dv-pho"><img alt="" src="' + s.invoice + '"><button type="button" data-dv-rminvoice aria-label="حذف">×</button></div>' : '') + '<button type="button" class="dv-pho add" data-dv-pickinvoice>＋</button>';
+    const ph = f.querySelector('[data-photos]'); if (ph) ph.innerHTML = s.photos.map((p, i) => '<div class="dv-pho"><img alt="" data-ref="' + esc(p) + '"><button type="button" data-dv-rmphoto="' + i + '" aria-label="حذف">×</button></div>').join('') + (s.photos.length < 5 ? '<button type="button" class="dv-pho add" data-dv-pickphotos>＋</button>' : '');
+    const inv = f.querySelector('[data-invoice]'); if (inv) inv.innerHTML = (s.invoice ? '<div class="dv-pho"><img alt="" data-ref="' + esc(s.invoice) + '"><button type="button" data-dv-rminvoice aria-label="حذف">×</button></div>' : '') + '<button type="button" class="dv-pho add" data-dv-pickinvoice>＋</button>';
     f.querySelectorAll('[data-idslot]').forEach(sl => setIdPreview(sl, sl.dataset.idslot === 'front' ? s.idFront : s.idBack));
-    profit(kind);
+    hydrate(f); profit(kind);
   }
   function profit(kind){
     const f = formEl(kind); const buy = num(val(kind, 'buyPrice')), sell = num(val(kind, 'sellPrice')); const qty = kind === 'new' ? Math.max(1, Math.floor(num(val(kind, 'qty')) || 1)) : 1;
@@ -24970,6 +25024,7 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
     if (!old && val(kind, 'autoList')) listInSale(it);
     if (!saveItems(kind, list)) return;
     if (kind === 'used' && (s.idFront || s.idBack)) { const m = idMap(); m['used:' + it.id] = { front: s.idFront, back: s.idBack, name: it.name, ts: Date.now() }; saveIdMap(m); }
+    (s.trash || []).forEach(r => imgDB.del(r));
     closeForm(kind); refreshAll(); alert('تم حفظ الجهاز ' + (kind === 'used' ? 'المستعمل' : 'الجديد') + ' ✅');
   }
 
@@ -24977,9 +25032,9 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
   let viewing = '';
   function openIdViewer(key, title){
     viewing = key; const m = $('dv-id-modal'); const map = idMap(); const d = map[key] || {};
-    const slot = (side, label) => '<div class="dv-idv"><b>' + label + '</b>' + (d[side] ? '<img alt="' + label + '" src="' + d[side] + '">' : '<div class="dv-idnone">لا توجد صورة</div>') + '<div class="dv-idvbtns"><button type="button" class="dv-btn" data-dv-idchange="' + side + '">📷 ' + (d[side] ? 'تغيير' : 'إضافة') + '</button>' + (d[side] ? '<button type="button" class="dv-btn del" data-dv-iddel="' + side + '">🗑️</button>' : '') + '</div><input type="file" accept="image/*" hidden data-pick="idv-' + side + '"></div>';
+    const slot = (side, label) => '<div class="dv-idv"><b>' + label + '</b>' + (d[side] ? '<img alt="' + label + '" data-ref="' + esc(d[side]) + '">' : '<div class="dv-idnone">لا توجد صورة</div>') + '<div class="dv-idvbtns"><button type="button" class="dv-btn" data-dv-idchange="' + side + '">📷 ' + (d[side] ? 'تغيير' : 'إضافة') + '</button>' + (d[side] ? '<button type="button" class="dv-btn del" data-dv-iddel="' + side + '">🗑️</button>' : '') + '</div><input type="file" accept="image/*" hidden data-pick="idv-' + side + '"></div>';
     m.firstElementChild.innerHTML = '<div class="dv-sheethead"><div><small>🪪 بطاقة الشخص</small><h3>' + esc(title || d.name || '') + '</h3></div><button type="button" class="dv-x" data-dv-idclose aria-label="إغلاق">✕</button></div><div class="dv-sheetbody">' + slot('front', 'وش البطاقة') + slot('back', 'ضهر البطاقة') + '</div>';
-    m.hidden = false; document.documentElement.classList.add('sa-lock');
+    hydrate(m); m.hidden = false; document.documentElement.classList.add('sa-lock');
   }
   function closeIdViewer(){ const m = $('dv-id-modal'); if (m) m.hidden = true; document.documentElement.classList.remove('sa-lock'); viewing = ''; }
   function titleFor(key){
@@ -24999,7 +25054,7 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
     const sv = t.closest('[data-dv-save]'); if (sv) { save(sv.dataset.dvSave); return; }
     const ed = t.closest('[data-dv-edit]'); if (ed) { const [k, id] = ed.dataset.dvEdit.split(':'); openForm(k, id); return; }
     const del = t.closest('[data-dv-del]');
-    if (del) { const [k, id] = del.dataset.dvDel.split(':'); const list = items(k); const it = list.find(x => x.id === id); if (!it) return; if (!confirm('حذف الجهاز «' + it.name + '» نهائيًا؟')) return; unlist(it); saveItems(k, list.filter(x => x.id !== id)); const m = idMap(); delete m['used:' + id]; saveIdMap(m); refreshAll(); return; }
+    if (del) { const [k, id] = del.dataset.dvDel.split(':'); const list = items(k); const it = list.find(x => x.id === id); if (!it) return; if (!confirm('حذف الجهاز «' + it.name + '» نهائيًا؟')) return; unlist(it); (it.photos || []).forEach(r => imgDB.del(r)); if (it.invoicePhoto) imgDB.del(it.invoicePhoto); saveItems(k, list.filter(x => x.id !== id)); const m = idMap(); if (m['used:' + id]) { imgDB.del(m['used:' + id].front); imgDB.del(m['used:' + id].back); } delete m['used:' + id]; saveIdMap(m); refreshAll(); return; }
     const ls = t.closest('[data-dv-list]'); if (ls) { const [k, id] = ls.dataset.dvList.split(':'); const list = items(k); const it = list.find(x => x.id === id); if (!it) return; if (it.imei && imeiClash(it.imei, id) === 'بيع التلفونات') { alert('الجهاز ده موجود بالفعل في بيع التلفونات.'); return; } listInSale(it); saveItems(k, list); refreshAll(); alert('اتضاف لقسم بيع التلفونات ✅'); return; }
     const ul = t.closest('[data-dv-unlist]'); if (ul) { const [k, id] = ul.dataset.dvUnlist.split(':'); const list = items(k); const it = list.find(x => x.id === id); if (!it) return; unlist(it); saveItems(k, list); refreshAll(); return; }
     const flt = t.closest('[data-flt]'); if (flt) { const kind = flt.closest('[data-dv-filters]').dataset.dvFilters; filt[kind].s = flt.dataset.flt; render(kind); return; }
@@ -25008,14 +25063,16 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
     const stp = t.closest('[data-dv-step]'); if (stp) { const input = stp.parentElement.querySelector('input'); input.value = Math.max(1, Math.floor(num(input.value) || 1) + Number(stp.dataset.dvStep)); const kind = stp.closest('.dv-form').id.replace('dv-form-', ''); profit(kind); return; }
     const pp = t.closest('[data-dv-pickphotos]'); if (pp) { pp.closest('.dv-form').querySelector('[data-pick="photos"]').click(); return; }
     const pi = t.closest('[data-dv-pickinvoice]'); if (pi) { pi.closest('.dv-form').querySelector('[data-pick="invoice"]').click(); return; }
-    const rp = t.closest('[data-dv-rmphoto]'); if (rp) { const kind = rp.closest('.dv-form').id.replace('dv-form-', ''); st[kind].photos.splice(Number(rp.dataset.dvRmphoto), 1); paintForm(kind); return; }
+    const rp = t.closest('[data-dv-rmphoto]'); if (rp) { const kind = rp.closest('.dv-form').id.replace('dv-form-', ''); (st[kind].trash = st[kind].trash || []).push(st[kind].photos[Number(rp.dataset.dvRmphoto)]); st[kind].photos.splice(Number(rp.dataset.dvRmphoto), 1); paintForm(kind); return; }
     const ri = t.closest('[data-dv-rminvoice]'); if (ri) { st.new.invoice = ''; paintForm('new'); return; }
     const slot = t.closest('[data-idslot]'); if (slot) { const inp = slot.querySelector('input[type=file]'); if (inp && t !== inp) inp.click(); return; }
+    const xg = t.closest('[data-xg]'); if (xg) { const f = xg.dataset.xg; xst[f].grade = xst[f].grade === xg.dataset.val ? '' : xg.dataset.val; paintExtra(f); return; }
+    const xa = t.closest('[data-xa]'); if (xa) { const f = xa.dataset.xa, v = xa.dataset.val; xst[f].acc = xst[f].acc.includes(v) ? xst[f].acc.filter(z => z !== v) : xst[f].acc.concat(v); paintExtra(f); return; }
     const io = t.closest('[data-dv-idopen]'); if (io) { openIdViewer(io.dataset.dvIdopen, titleFor(io.dataset.dvIdopen)); return; }
     const ib = t.closest('.dv-id-btn'); if (ib) { openIdViewer(ib.dataset.dvIdkey, titleFor(ib.dataset.dvIdkey)); return; }
     if (t.closest('[data-dv-idclose]') || t === $('dv-id-modal')) { closeIdViewer(); return; }
     const ic = t.closest('[data-dv-idchange]'); if (ic) { ic.closest('.dv-idv').querySelector('input[type=file]').click(); return; }
-    const idl = t.closest('[data-dv-iddel]'); if (idl) { const m = idMap(); if (m[viewing]) { m[viewing][idl.dataset.dvIddel] = ''; saveIdMap(m); } openIdViewer(viewing, titleFor(viewing)); render('used'); decorate(); return; }
+    const idl = t.closest('[data-dv-iddel]'); if (idl) { const m = idMap(); if (m[viewing]) { imgDB.del(m[viewing][idl.dataset.dvIddel]); m[viewing][idl.dataset.dvIddel] = ''; saveIdMap(m); } openIdViewer(viewing, titleFor(viewing)); render('used'); decorate(); return; }
   }, true);
 
   document.addEventListener('change', async function (e) {
@@ -25023,15 +25080,15 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
     if (t.matches('[data-dv-status]')) { const kind = ['used', 'new'].find(k => items(k).some(x => x.id === t.dataset.dvStatus)); if (kind) { const list = items(kind); const it = list.find(x => x.id === t.dataset.dvStatus); it.status = t.value; saveItems(kind, list); refreshAll(); } return; }
     const pick = t.dataset && t.dataset.pick; if (!pick || !t.files || !t.files.length) return;
     const form = t.closest('.dv-form'); const kind = form ? form.id.replace('dv-form-', '') : '';
-    if (pick === 'photos') { for (const f of [...t.files]) { if (st[kind].photos.length >= 5) break; const d = await readImage(f, 1000, 0.75); if (d) st[kind].photos.push(d); } paintForm(kind); }
-    else if (pick === 'invoice') { const d = await readImage(t.files[0], 1100, 0.78); if (d) { st.new.invoice = d; paintForm('new'); } }
+    if (pick === 'photos') { for (const f of [...t.files]) { if (st[kind].photos.length >= 5) break; const d = await readImage(f, 820, 0.68); if (d) st[kind].photos.push(await imgDB.put(d)); } paintForm(kind); }
+    else if (pick === 'invoice') { const d = await readImage(t.files[0], 1000, 0.7); if (d) { st.new.invoice = await imgDB.put(d); paintForm('new'); } }
     else if (pick.startsWith('id-')) {
-      const side = pick.slice(3); const d = await readImage(t.files[0], 1100, 0.8); if (!d) return;
+      const side = pick.slice(3); const d0 = await readImage(t.files[0], 1000, 0.72); if (!d0) return; const d = await imgDB.put(d0);
       const slot = t.closest('[data-idslot]'); const pair = t.closest('.dv-idpair');
       if (pair) { pend[pair.dataset.form][side] = d; setIdPreview(slot, d); }
       else { st[kind][side === 'front' ? 'idFront' : 'idBack'] = d; paintForm(kind); }
     } else if (pick.startsWith('idv-')) {
-      const side = pick.slice(4); const d = await readImage(t.files[0], 1100, 0.8); if (!d || !viewing) return;
+      const side = pick.slice(4); const d0 = await readImage(t.files[0], 1000, 0.72); if (!d0 || !viewing) return; const d = await imgDB.put(d0);
       const m = idMap(); m[viewing] = Object.assign({ front: '', back: '', name: titleFor(viewing), ts: Date.now() }, m[viewing] || {}); m[viewing][side] = d; if (saveIdMap(m)) { openIdViewer(viewing, titleFor(viewing)); render('used'); decorate(); }
     }
     t.value = '';
@@ -25054,17 +25111,33 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
   }
 
   /* ---------- ID button on existing sale / purchase cards + capture after their save ---------- */
+  function detailTags(d, serial){
+    if (!d) return '';
+    const out = [];
+    if (serial) out.push('<span class="dv-tag t-blue">IMEI ' + esc(serial) + '</span>');
+    if (d.grade) out.push('<span class="dv-tag t-ok">' + esc(d.grade) + '</span>');
+    if (d.storage) out.push('<span class="dv-tag t-blue">' + esc(d.storage) + '</span>');
+    if (d.color) out.push('<span class="dv-tag t-gray">' + esc(d.color) + '</span>');
+    if (d.battery) out.push('<span class="dv-tag t-blue">بطارية ' + esc(d.battery) + '%</span>');
+    if (d.warranty) out.push('<span class="dv-tag t-warn">ضمان ' + esc(d.warranty) + '</span>');
+    (d.accessories || []).forEach(a => out.push('<span class="dv-tag t-gray">' + esc(a) + '</span>'));
+    return out.join('');
+  }
   function decorate(){
-    const map = idMap();
-    document.querySelectorAll('#devices-list .card-edit-button[data-id]').forEach(btn => {
-      const art = btn.closest('article'); if (!art || art.querySelector('.dv-id-btn')) return; const key = 'device:' + btn.dataset.id;
-      const b = document.createElement('button'); b.type = 'button'; b.className = 'dv-id-btn' + (map[key] ? ' has' : ''); b.dataset.dvIdkey = key; b.textContent = '🪪 البطاقة' + (map[key] ? ' ✓' : '');
-      (art.querySelector('.card-print-area') || art).appendChild(b);
-    });
-    document.querySelectorAll('#phone-purchases-list .purchase-edit-button[data-id]').forEach(btn => {
-      const art = btn.closest('article'); if (!art || art.querySelector('.dv-id-btn')) return; const key = 'purchase:' + btn.dataset.id;
-      const b = document.createElement('button'); b.type = 'button'; b.className = 'dv-id-btn' + (map[key] ? ' has' : ''); b.dataset.dvIdkey = key; b.textContent = '🪪 البطاقة' + (map[key] ? ' ✓' : '');
-      btn.after(b);
+    const map = idMap(), det = detMap();
+    [['#devices-list .card-edit-button[data-id]', 'device:', false], ['#phone-purchases-list .purchase-edit-button[data-id]', 'purchase:', true]].forEach(([sel, prefix, isPurchase]) => {
+      document.querySelectorAll(sel).forEach(btn => {
+        const art = btn.closest('article'); if (!art) return; const key = prefix + btn.dataset.id;
+        let b = art.querySelector('.dv-id-btn');
+        if (!b) {
+          b = document.createElement('button'); b.type = 'button'; b.dataset.dvIdkey = key;
+          if (isPurchase) btn.after(b); else (art.querySelector('.card-print-area') || art).appendChild(b);
+        }
+        b.className = 'dv-id-btn' + (map[key] && (map[key].front || map[key].back) ? ' has' : ''); b.textContent = '🪪 البطاقة' + (map[key] && (map[key].front || map[key].back) ? ' ✓' : '');
+        let tg = art.querySelector('.dv-xtags'); const html = detailTags(det[key]);
+        if (html) { if (!tg) { tg = document.createElement('div'); tg.className = 'dv-tags dv-xtags'; const h3 = art.querySelector('h3'); if (h3) h3.after(tg); else art.appendChild(tg); } if (tg.innerHTML !== html) tg.innerHTML = html; }
+        else if (tg) tg.remove();
+      });
     });
   }
   function watchLists(){
@@ -25072,18 +25145,41 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
     decorate();
   }
   function attachAfterSave(form){
-    const p = pend[form]; if (!p.front && !p.back) return;
+    const p = pend[form]; const ex = readExtras(form);
+    if (!p.front && !p.back && !Object.keys(ex).length) return;
     const before = form === 'device' ? new Set((devices || []).map(d => String(d.id))) : new Set((phonePurchases || []).map(x => String(x.id)));
     const editing = form === 'device' ? (typeof editingDeviceId !== 'undefined' ? editingDeviceId : null) : (typeof editingPurchaseId !== 'undefined' ? editingPurchaseId : null);
     setTimeout(function () {
       const list = form === 'device' ? devices : phonePurchases; const fresh = (list || []).find(x => !before.has(String(x.id)));
       const id = fresh ? String(fresh.id) : (editing ? String(editing) : ''); if (!id) return;
-      const key = (form === 'device' ? 'device:' : 'purchase:') + id; const m = idMap();
-      m[key] = Object.assign({ front: '', back: '', name: fresh ? (fresh.phoneName || '') : titleFor(key), ts: Date.now() }, m[key] || {});
-      if (p.front) m[key].front = p.front; if (p.back) m[key].back = p.back;
-      if (saveIdMap(m)) { resetPending(form); decorate(); }
+      const key = (form === 'device' ? 'device:' : 'purchase:') + id;
+      if (p.front || p.back) {
+        const m = idMap(); m[key] = Object.assign({ front: '', back: '', name: fresh ? (fresh.phoneName || '') : titleFor(key), ts: Date.now() }, m[key] || {});
+        if (p.front) m[key].front = p.front; if (p.back) m[key].back = p.back; saveIdMap(m);
+      }
+      if (Object.keys(ex).length || editing) { const dm = detMap(); if (Object.keys(ex).length) dm[key] = ex; else delete dm[key]; saveDet(dm); }
+      if (form === 'device' && ex.imei) { const rec = (devices || []).find(d => String(d.id) === id); if (rec) { rec.serialNumber = ex.imei; rec.serial = ex.imei; try { saveDevices(); } catch (_) {} } }
+      resetPending(form); resetExtras(form); decorate(); refreshAll();
     }, 180);
   }
+  // edit => pre-fill the extra fields; add / close => start clean; transfer purchase -> sale keeps the data
+  document.addEventListener('click', function (e) {
+    const t = e.target; if (!t || !t.closest) return;
+    const ed = t.closest('#devices-list .card-edit-button[data-id]'); if (ed) { setTimeout(function () { resetPending('device'); fillExtras('device', 'device:' + ed.dataset.id); }, 90); return; }
+    const pe = t.closest('#phone-purchases-list .purchase-edit-button[data-id]'); if (pe) { setTimeout(function () { resetPending('purchase'); fillExtras('purchase', 'purchase:' + pe.dataset.id); }, 90); return; }
+    if (t.closest('#phone-sale-section .sales-controls .add-button, #close-device-form-button')) { resetPending('device'); resetExtras('device'); return; }
+    if (t.closest('#phone-purchases-section .sales-controls .add-button, #close-phone-purchase-form')) { resetPending('purchase'); resetExtras('purchase'); return; }
+    const tr = t.closest('[data-transfer-purchase]');
+    if (tr) {
+      const pid = String(tr.dataset.transferPurchase); const before = new Set((devices || []).map(d => String(d.id)));
+      setTimeout(function () {
+        const fresh = (devices || []).find(d => !before.has(String(d.id))); if (!fresh) return;
+        const m = idMap(), dm = detMap(); const from = 'purchase:' + pid, to = 'device:' + fresh.id;
+        if (m[from]) m[to] = Object.assign({}, m[from]); if (dm[from]) dm[to] = Object.assign({}, dm[from]);
+        saveIdMap(m); saveDet(dm); decorate();
+      }, 300);
+    }
+  }, true);
   document.addEventListener('click', function (e) {
     const t = e.target; if (!t || !t.closest) return;
     if (t.closest('#save-device-button')) attachAfterSave('device');
@@ -25095,4 +25191,228 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
   window.addEventListener('act-user-data-ready', function () { setTimeout(function () { refreshAll(); decorate(); }, 0); });
   function init(){ build(); watchLists(); refreshAll(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(init, 400); }); else setTimeout(init, 400);
+})();
+
+/* =========================================================
+   ACT ACCESSORY CATEGORIES
+   Every accessory type is its own section (screens, backs, cases, flats, batteries...)
+   with its own stock, filters and add-form. Uses the same stock records, so invoice
+   sales / returns keep deducting and restoring quantities exactly as before.
+========================================================= */
+(function actAccessoryCategories(){
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const fmt = v => (Math.round(num(v) * 100) / 100).toLocaleString('en-US');
+  const store = () => window.actAccessoryStore;
+  const CATS = [
+    { id: 'screens', label: 'شاشات', icon: '📺', grad: 'linear-gradient(135deg,#7c3aed,#c084fc)', add: 'إضافة شاشة', fields: [{ k: 'type', label: 'النوع', chips: ['أصلي', 'OLED', 'كوبي', 'AAA'] }, { k: 'frame', label: 'الإطار', chips: ['بإطار', 'بدون إطار'] }] },
+    { id: 'backs', label: 'باغات', icon: '🔙', grad: 'linear-gradient(135deg,#0ea5e9,#38bdf8)', add: 'إضافة باك / غطاء خلفي', fields: [{ k: 'type', label: 'النوع', chips: ['أصلي', 'كوبي'] }] },
+    { id: 'cases', label: 'جرابات', icon: '👜', grad: 'linear-gradient(135deg,#2563eb,#60a5fa)', add: 'إضافة جراب', fields: [{ k: 'material', label: 'الخامة', chips: ['سيليكون', 'جلد', 'شفاف', 'بلاستيك', 'ماجسيف'] }] },
+    { id: 'flats', label: 'فلاتات', icon: '🧵', grad: 'linear-gradient(135deg,#db2777,#fb7185)', add: 'إضافة فلات', fields: [{ k: 'kind', label: 'نوع الفلات', chips: ['باور', 'شحن', 'شاشة', 'كاميرا', 'بصمة'] }] },
+    { id: 'batteries', label: 'بطاريات', icon: '🔋', grad: 'linear-gradient(135deg,#ea580c,#fbbf24)', add: 'إضافة بطارية', fields: [{ k: 'capacity', label: 'السعة (mAh)', text: '🔋 مثال: 4000' }, { k: 'type', label: 'النوع', chips: ['أصلي', 'كوبي'] }] },
+    { id: 'chargers', label: 'شواحن وكابلات', icon: '⚡', grad: 'linear-gradient(135deg,#059669,#34d399)', add: 'إضافة شاحن / كابل', fields: [{ k: 'power', label: 'القدرة (واط)', text: '⚡ مثال: 25' }, { k: 'plug', label: 'نوع الفيشة', chips: ['Type-C', 'Lightning', 'Micro USB', 'USB'] }, { k: 'length', label: 'الطول', text: '📏 مثال: 1 متر' }] },
+    { id: 'headphones', label: 'سماعات', icon: '🎧', grad: 'linear-gradient(135deg,#0891b2,#22d3ee)', add: 'إضافة سماعة', fields: [{ k: 'kind', label: 'النوع', chips: ['سلك', 'بلوتوث', 'سماعة أذن'] }] },
+    { id: 'glass', label: 'واقي شاشة (جلاس)', icon: '🛡️', grad: 'linear-gradient(135deg,#4f46e5,#818cf8)', add: 'إضافة واقي شاشة', fields: [{ k: 'kind', label: 'النوع', chips: ['عادي', '9D', 'خصوصية', 'سيراميك'] }] },
+    { id: 'misc', label: 'إكسسوارات متنوعة', icon: '📦', grad: 'linear-gradient(135deg,#64748b,#94a3b8)', add: 'إضافة إكسسوار', fields: [] }
+  ];
+  const catById = id => CATS.find(c => c.id === id) || CATS[CATS.length - 1];
+  function guess(name){
+    const n = String(name || '').toLocaleLowerCase('ar');
+    if (/جلاس|واقي|حماي|سكرين|glass/.test(n)) return 'glass';
+    if (/شاش|lcd|oled/.test(n)) return 'screens';
+    if (/\bباك\b|باج|غطاء خلفي|ظهر/.test(n)) return 'backs';
+    if (/جراب|كفر|كيس|case|cover/.test(n)) return 'cases';
+    if (/فلات|flex/.test(n)) return 'flats';
+    if (/بطار|battery/.test(n)) return 'batteries';
+    if (/شاحن|كابل|كبل|وصل|فيش|charger|cable/.test(n)) return 'chargers';
+    if (/سماع|هيدفون|ايربود|airpod|headphone/.test(n)) return 'headphones';
+    return 'misc';
+  }
+  const catOf = it => (it.category && CATS.some(c => c.id === it.category)) ? it.category : guess(it.name);
+  const minOf = it => (it.minStock != null && it.minStock !== '') ? num(it.minStock) : 3;
+  const levelOf = it => { const q = num(it.quantity); return q <= 0 ? 'out' : (q <= minOf(it) ? 'low' : 'ok'); };
+  const rows = () => { try { return store() ? store().read() : []; } catch (_) { return []; } };
+
+  /* ---------- state ---------- */
+  const S = { view: '', q: '', filter: 'all', form: false, editing: '', fcat: 'misc', attrs: {}, photo: '', adj: '', home: '' };
+  let root = null;
+
+  function build(){
+    const sec = $('accessories-section'); if (!sec || $('acc2-root') || !store()) return false;
+    root = document.createElement('div'); root.id = 'acc2-root'; root.className = 'dv-sec acc2';
+    const back = sec.querySelector('.act-extra-back'); if (back) back.after(root); else sec.prepend(root);
+    sec.classList.add('acc2-on');
+    migrate(); render();
+    return true;
+  }
+  function migrate(){
+    try {
+      const flag = 'actAccessoryCatMigrated_' + ((typeof currentUser !== 'undefined' && currentUser && currentUser.uid) || 'guest');
+      if (localStorage.getItem(flag)) return;
+      const list = rows(); if (!list.length) return;
+      let changed = false; list.forEach(it => { if (!it.category) { it.category = guess(it.name); changed = true; } });
+      if (changed) store().save(list);
+      localStorage.setItem(flag, '1');
+    } catch (_) {}
+  }
+
+  /* ---------- rendering ---------- */
+  function tilesFor(list){
+    const units = list.reduce((t, x) => t + num(x.quantity), 0), value = list.reduce((t, x) => t + num(x.quantity) * num(x.cost), 0);
+    const low = list.filter(x => levelOf(x) !== 'ok').length;
+    return { units, value, low };
+  }
+  function renderHome(){
+    const all = rows(); const t = tilesFor(all); const q = S.home.trim().toLocaleLowerCase('ar');
+    let h = '<div class="acc2-hero"><div class="acc2-hero-top"><div><small>ACCESSORIES INVENTORY</small><h2>🎧 الإكسسوارات وقطع الغيار</h2><p>كل نوع قسم لوحده بمخزونه وفورمه</p></div></div><div class="acc2-tiles"><div><span>الأقسام</span><b>' + CATS.length + '</b></div><div><span>الأصناف</span><b>' + all.length + '</b></div><div><span>قيمة المخزون</span><b>' + fmt(t.value) + '</b></div><div><span>ناقصة</span><b>' + t.low + '</b></div></div></div>';
+    h += '<div class="dv-search"><span>🔎</span><input type="search" id="acc2-home-search" placeholder="ابحث في كل الأقسام بالاسم أو الكود أو الموديل" value="' + esc(S.home) + '"></div>';
+    if (q) {
+      const hits = all.filter(it => [it.name, it.code, it.model, it.color].some(v => String(v || '').toLocaleLowerCase('ar').includes(q)));
+      h += hits.length ? '<div class="dv-list">' + hits.map(cardHtml).join('') + '</div>' : '<div class="dv-empty">مفيش نتائج مطابقة.</div>';
+    } else {
+      h += '<div class="acc2-grid">' + CATS.map(c => {
+        const list = all.filter(it => catOf(it) === c.id); const tt = tilesFor(list);
+        return '<button type="button" class="acc2-cat" data-acc-open="' + c.id + '">' + (tt.low ? '<span class="acc2-low">⚠️ ' + tt.low + ' ناقص</span>' : '') + '<span class="acc2-ico" style="background:' + c.grad + '">' + c.icon + '</span><strong>' + c.label + '</strong><small>' + list.length + ' صنف</small><em>قيمة ' + fmt(tt.value) + '</em></button>';
+      }).join('') + '</div><div class="acc2-hint">اضغط على أي قسم يفتح مخزونه وإضافته لوحده</div>';
+    }
+    return h;
+  }
+  function specTags(it){
+    const c = catById(catOf(it)); const a = it.attrs || {}; const out = [];
+    c.fields.forEach(f => { if (a[f.k]) out.push('<span class="acc2-sp">' + esc(a[f.k]) + '</span>'); });
+    if (it.model) out.unshift('<span class="acc2-sp b">' + esc(it.model) + '</span>');
+    if (it.color) out.push('<span class="acc2-sp g">' + esc(it.color) + '</span>');
+    return out.join('');
+  }
+  function cardHtml(it){
+    const c = catById(catOf(it)); const lvl = levelOf(it); const profit = num(it.price) - num(it.cost); const max = Math.max(num(it.quantity), minOf(it) * 3, 1);
+    const badge = lvl === 'out' ? '<span class="acc2-q out">نفد</span>' : lvl === 'low' ? '<span class="acc2-q low">ناقص ' + num(it.quantity) + '</span>' : '<span class="acc2-q ok">متاح ' + num(it.quantity) + '</span>';
+    const pct = Math.min(100, Math.round(num(it.quantity) / max * 100));
+    return '<article class="acc2-item"><div class="acc2-ph" style="background:' + c.grad + '">' + (it.photo ? '<img alt="" data-ref="' + esc(it.photo) + '">' : c.icon) + '</div><div class="acc2-im"><div class="acc2-top"><b>' + esc(it.name || 'بدون اسم') + '</b>' + badge + '</div><small>' + (it.code ? 'كود ' + esc(it.code) : 'بدون كود') + (S.view ? '' : ' · ' + c.label) + '</small><div class="acc2-specs">' + specTags(it) + '</div><div class="acc2-bar"><i class="' + lvl + '" style="width:' + pct + '%"></i></div><div class="acc2-prices"><span>شراء ' + fmt(it.cost) + ' · ربح <em class="' + (profit < 0 ? 'neg' : '') + '">' + fmt(profit) + ' ج</em></span><b>' + fmt(it.price) + ' ج</b></div>' +
+      '<div class="acc2-act"><button type="button" data-acc-edit="' + esc(it.id) + '">✏️ تعديل</button><button type="button" class="in" data-acc-adj="in:' + esc(it.id) + '">➕ توريد</button><button type="button" class="out" data-acc-adj="out:' + esc(it.id) + '">📤 صرف</button><button type="button" class="del" data-acc-del="' + esc(it.id) + '" aria-label="حذف">🗑️</button></div>' +
+      (S.adj && S.adj.split(':')[1] === it.id ? '<div class="acc2-adj"><input type="number" min="1" step="1" inputmode="numeric" id="acc2-adj-qty" placeholder="الكمية ' + (S.adj.startsWith('in') ? 'اللي هتتورد' : 'اللي هتتصرف') + '"><button type="button" data-acc-adj-ok>تأكيد</button><button type="button" data-acc-adj-cancel>إلغاء</button></div>' : '') + '</div></article>';
+  }
+  function formHtml(){
+    const c = catById(S.fcat); const it = S.editing ? rows().find(x => x.id === S.editing) : null;
+    const g = (k, d) => it && it[k] != null ? it[k] : (d == null ? '' : d);
+    const field = (label, key, ph, type, extra) => '<div class="dv-f"><label>' + label + '</label><input data-acc-k="' + key + '" type="' + (type || 'text') + '" placeholder="' + esc(ph || '') + '" value="' + esc(extra && extra.value != null ? extra.value : '') + '" ' + ((extra && extra.attr) || '') + ' autocomplete="off"></div>';
+    const a = S.attrs;
+    let h = '<div class="acc2-formhead" style="background:' + c.grad + '"><div><small>' + (S.editing ? 'EDIT ITEM' : 'NEW ITEM') + '</small><h3>' + c.icon + ' ' + (S.editing ? 'تعديل الصنف' : c.add) + '</h3><p>بيانات القسم: ' + c.label + '</p></div><button type="button" class="dv-x" data-acc-formclose aria-label="إغلاق">✕</button></div>';
+    h += '<div class="dv-card"><div class="dv-ch-h"><span class="dv-ci" style="background:' + c.grad + '">🗂️</span><div><strong>القسم</strong><small>الصنف هيظهر في قسمه لوحده</small></div></div><div class="dv-chips">' + CATS.map(x => '<button type="button" class="dv-ch' + (x.id === S.fcat ? ' on' : '') + '" data-acc-fcat="' + x.id + '">' + x.icon + ' ' + x.label + '</button>').join('') + '</div></div>';
+    h += '<div class="dv-card"><div class="dv-ch-h"><span class="dv-ci" style="background:linear-gradient(135deg,#ea580c,#fbbf24)">🏷️</span><div><strong>بيانات الصنف</strong><small>الاسم والموديل والمواصفات</small></div></div>' +
+      field('اسم الصنف', 'name', '🔎 اسم الصنف', 'text', { value: g('name') }) +
+      '<div class="dv-r2">' + field('كود الصنف (اختياري)', 'code', '🔖 الكود', 'text', { value: g('code') }) + field('الموديل المناسب', 'model', '📱 مثال: iPhone 12', 'text', { value: g('model') }) + '</div>' +
+      field('اللون', 'color', '🎨 اللون', 'text', { value: g('color') }) +
+      c.fields.map(f => f.chips
+        ? '<div class="dv-f"><label>' + f.label + '</label><div class="dv-chips">' + f.chips.map(v => '<button type="button" class="dv-ch' + (a[f.k] === v ? ' on' : '') + '" data-acc-attr="' + f.k + '" data-val="' + esc(v) + '">' + esc(v) + '</button>').join('') + '</div></div>'
+        : '<div class="dv-f"><label>' + f.label + '</label><input data-acc-attrtext="' + f.k + '" type="text" placeholder="' + esc(f.text) + '" value="' + esc(a[f.k] || '') + '" autocomplete="off"></div>').join('') + '</div>';
+    h += '<div class="dv-card"><div class="dv-ch-h"><span class="dv-ci" style="background:linear-gradient(135deg,#059669,#34d399)">📦</span><div><strong>المخزون والأسعار</strong><small>الربح بيتحسب لوحده</small></div></div>' +
+      '<div class="dv-r2"><div class="dv-f"><label>الكمية</label><div class="dv-step"><button type="button" data-acc-step="1">＋</button><input data-acc-k="quantity" type="number" min="0" step="1" value="' + esc(g('quantity', 1)) + '" inputmode="numeric"><button type="button" data-acc-step="-1">−</button></div></div>' + field('تنبيه لما يقل عن', 'minStock', '⚠️ 3', 'number', { value: g('minStock', 3), attr: 'min="0" step="1" inputmode="numeric"' }) + '</div>' +
+      '<div class="dv-r2">' + field('سعر الشراء', 'cost', '💵 سعر الشراء', 'number', { value: g('cost', ''), attr: 'min="0" step="0.01" inputmode="decimal"' }) + field('سعر البيع', 'price', '🏷️ سعر البيع', 'number', { value: g('price', ''), attr: 'min="0" step="0.01" inputmode="decimal"' }) + '</div>' +
+      '<div class="dv-profit" id="acc2-profit"><span>الربح للقطعة · إجمالي المخزون</span><b>0 ج</b></div>' +
+      '<div class="dv-f" style="margin-top:10px"><label>صورة الصنف</label><div class="dv-photos">' + (S.photo ? '<div class="dv-pho"><img alt="" data-ref="' + esc(S.photo) + '"><button type="button" data-acc-rmphoto aria-label="حذف">×</button></div>' : '') + '<button type="button" class="dv-pho add" data-acc-pickphoto>＋</button></div><input type="file" accept="image/*" hidden id="acc2-photo-input"></div></div>';
+    h += '<div class="dv-acts"><button type="button" class="dv-btn" data-acc-formclose>إلغاء</button><button type="button" class="dv-btn dv-main" data-acc-save style="background:' + c.grad + '">💾 حفظ الصنف</button></div>';
+    return h;
+  }
+  function renderCat(){
+    const c = catById(S.view); const all = rows().filter(it => catOf(it) === c.id); const t = tilesFor(all);
+    const q = S.q.trim().toLocaleLowerCase('ar');
+    const matches = all.filter(it => !q || [it.name, it.code, it.model, it.color].some(v => String(v || '').toLocaleLowerCase('ar').includes(q)));
+    const shown = matches.filter(it => S.filter === 'all' || (S.filter === 'ok' ? levelOf(it) === 'ok' : S.filter === 'low' ? levelOf(it) === 'low' : levelOf(it) === 'out'));
+    const cnt = f => matches.filter(it => f === 'all' || levelOf(it) === f).length;
+    let h = '<button type="button" class="acc2-back" data-acc-home>→ كل الأقسام</button>';
+    h += '<div class="acc2-hero" style="background:' + c.grad + '"><div class="acc2-hero-top"><div><small>' + c.id.toUpperCase() + '</small><h2>' + c.icon + ' ' + c.label + '</h2><p>' + all.length + ' صنف · ' + t.low + ' ناقص</p></div></div><div class="acc2-tiles three"><div><span>القطع</span><b>' + t.units + '</b></div><div><span>القيمة</span><b>' + fmt(t.value) + '</b></div><div><span>ناقصة</span><b>' + t.low + '</b></div></div></div>';
+    if (S.form) { h += '<div class="dv-form acc2-form">' + formHtml() + '</div>'; return h; }
+    h += '<div class="dv-search"><span>🔎</span><input type="search" id="acc2-search" placeholder="ابحث بالاسم أو الكود أو الموديل" value="' + esc(S.q) + '"></div>';
+    h += '<div class="dv-chips dv-filters">' + [['all', 'الكل'], ['ok', 'متاح'], ['low', '⚠️ ناقص'], ['out', 'نفد']].map(f => '<button type="button" class="dv-ch' + (S.filter === f[0] ? ' on' : '') + '" data-acc-flt="' + f[0] + '">' + f[1] + ' ' + cnt(f[0 ]) + '</button>').join('') + '</div>';
+    h += '<button type="button" class="dv-addbig" data-acc-add style="background:' + c.grad + '">＋ ' + c.add + '</button>';
+    h += shown.length ? '<div class="dv-list">' + shown.map(cardHtml).join('') + '</div>' : '<div class="dv-empty">' + (all.length ? 'مفيش نتائج مطابقة.' : 'لسه مفيش أصناف في القسم ده. اضغط «' + c.add + '» وابدأ.') + '</div>';
+    const ids = new Set(all.map(x => x.id)); let moves = []; try { moves = store().readMovements().filter(m => ids.has(m.itemId)).slice(0, 6); } catch (_) {}
+    if (moves.length) h += '<div class="acc2-moves"><h4>آخر الحركات</h4>' + moves.map(m => '<div class="acc2-move"><span>' + (m.kind === 'stock_in' ? '➕ توريد' : m.kind === 'stock_out' ? '📤 صرف' : m.kind === 'sale' ? '🛒 بيع' : m.kind === 'return' ? '↩️ مرتجع' : 'حركة') + ' · ' + esc(m.name || '') + '</span><b>' + (m.delta != null ? (m.delta > 0 ? '+' : '') + m.delta : num(m.quantity)) + '</b></div>').join('') + '</div>';
+    return h;
+  }
+  function render(){
+    if (!root) return;
+    const keep = document.activeElement && document.activeElement.id; const pos = document.activeElement && document.activeElement.selectionStart;
+    root.innerHTML = S.view ? renderCat() : renderHome();
+    if (window.actHydrateImages) window.actHydrateImages(root);
+    profit();
+    if (keep && $(keep) && /search/.test(keep)) { const el = $(keep); el.focus(); try { el.setSelectionRange(pos, pos); } catch (_) {} }
+  }
+  function val(k){ const el = root.querySelector('[data-acc-k="' + k + '"]'); return el ? el.value : ''; }
+  function profit(){
+    const el = $('acc2-profit'); if (!el) return;
+    const p = num(val('price')) - num(val('cost')), q = Math.max(0, num(val('quantity')));
+    el.querySelector('b').textContent = (p >= 0 ? '+ ' : '− ') + fmt(Math.abs(p)) + ' ج · ' + fmt(p * q); el.classList.toggle('neg', p < 0);
+  }
+
+  /* ---------- actions ---------- */
+  function openForm(id){
+    S.form = true; S.editing = id || ''; S.attrs = {}; S.photo = ''; S.adj = ''; S.trash = [];
+    if (id) { const it = rows().find(x => x.id === id); if (it) { S.fcat = catOf(it); S.attrs = Object.assign({}, it.attrs || {}); S.photo = it.photo || ''; } }
+    else S.fcat = S.view || 'misc';
+    render(); root.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function captureForm(){ const o = {}; root.querySelectorAll('[data-acc-k]').forEach(el => { o[el.dataset.accK] = el.value; }); root.querySelectorAll('[data-acc-attrtext]').forEach(el => { S.attrs[el.dataset.accAttrtext] = el.value; }); return o; }
+  function saveItem(){
+    const f = captureForm(); const name = String(f.name || '').trim(); const quantity = Number(f.quantity), cost = Number(f.cost), price = Number(f.price);
+    if (!name || ![quantity, cost, price].every(Number.isFinite) || !Number.isInteger(quantity) || quantity < 0 || cost < 0 || price < 0) { alert('راجع اسم الصنف والكمية الصحيحة وأسعار الشراء والبيع'); return; }
+    const list = rows(); const old = S.editing ? list.find(x => x.id === S.editing) : null;
+    const attrs = {}; catById(S.fcat).fields.forEach(x => { if (S.attrs[x.k]) attrs[x.k] = String(S.attrs[x.k]).trim(); });
+    const item = Object.assign({}, old || {}, { id: old ? old.id : 'acc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), name, code: String(f.code || '').trim(), model: String(f.model || '').trim(), color: String(f.color || '').trim(), category: S.fcat, attrs, quantity, cost, price, minStock: f.minStock === '' ? 3 : Math.max(0, Math.floor(num(f.minStock))), photo: S.photo || '', createdAt: old ? old.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() });
+    if (old) list[list.indexOf(old)] = item; else list.unshift(item);
+    if (!store().save(list)) return;
+    try { store().notify(old ? 'تم تحديث صنف إكسسوارات' : 'تمت إضافة صنف إكسسوارات', name + ' — الكمية ' + quantity, '🎧'); } catch (_) {}
+    (S.trash || []).forEach(r => { if (window.actImgDB && r !== item.photo) window.actImgDB.del(r); }); S.trash = [];
+    S.form = false; S.editing = ''; S.view = S.fcat; render();
+  }
+  function adjust(){
+    const [dir, id] = S.adj.split(':'); const n = Math.floor(num(($('acc2-adj-qty') || {}).value)); if (n < 1) { alert('أدخل عددًا صحيحًا أكبر من صفر.'); return; }
+    const list = rows(); const it = list.find(x => x.id === id); if (!it) return;
+    const delta = dir === 'in' ? n : -n; const next = num(it.quantity) + delta; if (next < 0) { alert('لا يمكن أن تصبح الكمية أقل من صفر. المتاح ' + num(it.quantity) + '.'); return; }
+    it.quantity = next; it.updatedAt = new Date().toISOString(); if (!store().save(list)) return;
+    const moves = store().readMovements(); moves.unshift({ id: 'accmove_' + Date.now(), itemId: it.id, name: it.name, kind: delta > 0 ? 'stock_in' : 'stock_out', quantity: n, delta, date: new Date().toISOString() }); store().saveMovements(moves);
+    try { store().notify(delta > 0 ? 'تمت إضافة كمية للمخزون' : 'تم صرف كمية من المخزون', it.name + ' — ' + n, delta > 0 ? '➕' : '📤'); } catch (_) {}
+    S.adj = ''; render();
+  }
+
+  document.addEventListener('click', function (e) {
+    const t = e.target; if (!t || !t.closest || !t.closest('#acc2-root')) return;
+    const open = t.closest('[data-acc-open]'); if (open) { S.view = open.dataset.accOpen; S.q = ''; S.filter = 'all'; S.form = false; render(); return; }
+    if (t.closest('[data-acc-home]')) { S.view = ''; S.form = false; S.adj = ''; render(); return; }
+    if (t.closest('[data-acc-add]')) { openForm(''); return; }
+    const ed = t.closest('[data-acc-edit]'); if (ed) { openForm(ed.dataset.accEdit); return; }
+    if (t.closest('[data-acc-formclose]')) { S.form = false; S.editing = ''; render(); return; }
+    const fc = t.closest('[data-acc-fcat]'); if (fc) { const keep = captureForm(); S.fcat = fc.dataset.accFcat; S.attrs = {}; render(); Object.keys(keep).forEach(k => { const el = root.querySelector('[data-acc-k="' + k + '"]'); if (el) el.value = keep[k]; }); profit(); return; }
+    const at = t.closest('[data-acc-attr]'); if (at) { const keep = captureForm(); S.attrs[at.dataset.accAttr] = S.attrs[at.dataset.accAttr] === at.dataset.val ? '' : at.dataset.val; render(); Object.keys(keep).forEach(k => { const el = root.querySelector('[data-acc-k="' + k + '"]'); if (el) el.value = keep[k]; }); profit(); return; }
+    const stp = t.closest('[data-acc-step]'); if (stp) { const inp = stp.parentElement.querySelector('input'); inp.value = Math.max(0, Math.floor(num(inp.value)) + Number(stp.dataset.accStep)); profit(); return; }
+    if (t.closest('[data-acc-pickphoto]')) { $('acc2-photo-input').click(); return; }
+    if (t.closest('[data-acc-rmphoto]')) { const keep = captureForm(); (S.trash = S.trash || []).push(S.photo); S.photo = ''; render(); Object.keys(keep).forEach(k => { const el = root.querySelector('[data-acc-k="' + k + '"]'); if (el) el.value = keep[k]; }); profit(); return; }
+    if (t.closest('[data-acc-save]')) { saveItem(); return; }
+    const flt = t.closest('[data-acc-flt]'); if (flt) { S.filter = flt.dataset.accFlt; render(); return; }
+    const adj = t.closest('[data-acc-adj]'); if (adj) { S.adj = S.adj === adj.dataset.accAdj ? '' : adj.dataset.accAdj; render(); const q = $('acc2-adj-qty'); if (q) q.focus(); return; }
+    if (t.closest('[data-acc-adj-ok]')) { adjust(); return; }
+    if (t.closest('[data-acc-adj-cancel]')) { S.adj = ''; render(); return; }
+    const del = t.closest('[data-acc-del]');
+    if (del) { const list = rows(); const it = list.find(x => x.id === del.dataset.accDel); if (!it) return; if (!confirm('تأكيد حذف الصنف «' + it.name + '»؟')) return; if (it.photo && window.actImgDB) window.actImgDB.del(it.photo); if (store().save(list.filter(x => x.id !== it.id))) { try { store().notify('تم حذف صنف إكسسوارات', it.name, '🗑️'); } catch (_) {} render(); } return; }
+  });
+  document.addEventListener('input', function (e) {
+    const t = e.target; if (!t || !t.closest || !t.closest('#acc2-root')) return;
+    if (t.id === 'acc2-home-search') { S.home = t.value; render(); }
+    else if (t.id === 'acc2-search') { S.q = t.value; render(); }
+    else if (t.dataset.accAttrtext) { S.attrs[t.dataset.accAttrtext] = t.value; }
+    else if (t.dataset.accK) profit();
+  });
+  document.addEventListener('change', async function (e) {
+    const t = e.target; if (!t || t.id !== 'acc2-photo-input' || !t.files || !t.files[0]) return;
+    const keep = captureForm(); const d = window.actReadImage ? await window.actReadImage(t.files[0], 900, 0.7) : ''; if (!d) return;
+    const ref = window.actImgDB ? await window.actImgDB.put(d) : d; if (S.photo) (S.trash = S.trash || []).push(S.photo); S.photo = ref;
+    render(); Object.keys(keep).forEach(k => { const el = root.querySelector('[data-acc-k="' + k + '"]'); if (el) el.value = keep[k]; }); profit();
+  });
+  window.addEventListener('act-accessories-data-updated', function () { if (root && !S.form) render(); });
+  window.addEventListener('act-user-data-ready', function () { if (!root) build(); else { migrate(); if (!S.form) render(); } });
+  function init(){ if (!build()) setTimeout(function () { build(); }, 800); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(init, 500); }); else setTimeout(init, 500);
 })();

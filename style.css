@@ -23045,3 +23045,73 @@ html.sa-lock{overflow:hidden}
 #devices-list .device-actions button,#phone-purchases-list .device-actions button{flex:1 1 auto;text-align:center}
 #devices-list .device-actions,#phone-purchases-list .device-actions{flex-direction:row !important;width:100% !important;align-items:stretch !important}
 #devices-list .device-card-top,#phone-purchases-list .device-card-top{flex-direction:row !important;justify-content:flex-start !important}
+
+/* =========================================================
+   ACT ACCESSORIES - categories (acc2-*) + extra phone specs
+========================================================= */
+#accessories-section.acc2-on>*:not(.act-extra-back):not(#acc2-root){display:none !important}
+.acc2{direction:rtl;color:var(--sa-text);display:flex;flex-direction:column;gap:12px}
+.acc2 [hidden]{display:none !important}
+.acc2-hero{border-radius:22px;padding:16px;color:#fff;background:linear-gradient(135deg,#7c2d12,#ea580c 60%,#fbbf24);position:relative;overflow:hidden;animation:saUp .4s both}
+.acc2-hero:after{content:"";position:absolute;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.12);left:-40px;top:-60px}
+.acc2-hero-top{position:relative;z-index:1}
+.acc2-hero small{font-size:11px;letter-spacing:.12em;opacity:.85}
+.acc2-hero h2{margin:2px 0;font-size:21px;color:#fff}.acc2-hero p{margin:0;font-size:12px;opacity:.92}
+.acc2-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:14px;position:relative;z-index:1}
+.acc2-tiles.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.acc2-tiles>div{background:rgba(255,255,255,.18);border-radius:12px;padding:8px 4px;text-align:center;min-width:0}
+.acc2-tiles span{display:block;font-size:10.5px;opacity:.92}.acc2-tiles b{font-size:15px;word-break:break-word}
+.acc2-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.acc2-cat{all:unset;box-sizing:border-box;position:relative;cursor:pointer;background:var(--sa-card);border:1px solid var(--sa-line);border-radius:20px;padding:14px 10px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:3px;transition:transform .2s,border-color .2s;animation:saUp .4s both;color:var(--sa-text)}
+.acc2-cat:hover,.acc2-cat:active{transform:translateY(-3px);border-color:var(--sa-accent)}
+.acc2-ico{width:52px;height:52px;border-radius:17px;display:flex;align-items:center;justify-content:center;font-size:26px;color:#fff;margin-bottom:4px;box-shadow:0 8px 18px rgba(0,0,0,.25)}
+.acc2-cat strong{font-size:14px}.acc2-cat small{color:var(--sa-sub);font-size:11.5px}.acc2-cat em{font-style:normal;color:var(--sa-ok);font-weight:700;font-size:12px}
+.acc2-low{position:absolute;top:8px;left:8px;font-size:10px;font-weight:800;background:rgba(255,107,122,.18);color:var(--sa-bad);padding:2px 8px;border-radius:99px}
+.acc2-hint{text-align:center;color:var(--sa-sub);font-size:12px;padding:4px}
+.acc2-back{all:unset;cursor:pointer;color:var(--sa-accent);font-weight:700;font-size:14px;padding:4px 2px}
+.acc2-item{display:flex;gap:10px;background:var(--sa-card);border:1px solid var(--sa-line);border-radius:18px;padding:10px;animation:saUp .35s both}
+.acc2-ph{flex:0 0 66px;height:66px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:30px;overflow:hidden}
+.acc2-ph img{width:100%;height:100%;object-fit:cover}
+.acc2-im{flex:1;min-width:0}
+.acc2-top{display:flex;justify-content:space-between;align-items:flex-start;gap:6px}
+.acc2-top b{font-size:14px;color:var(--sa-text)}
+.acc2-im small{color:var(--sa-sub);font-size:11.5px;display:block}
+.acc2-q{font-size:11px;font-weight:800;padding:3px 9px;border-radius:99px;white-space:nowrap}
+.acc2-q.ok{background:rgba(52,211,153,.16);color:var(--sa-ok)}.acc2-q.low{background:rgba(251,191,36,.18);color:var(--sa-warn)}.acc2-q.out{background:rgba(255,107,122,.16);color:var(--sa-bad)}
+.acc2-specs{display:flex;gap:5px;flex-wrap:wrap;margin:5px 0}
+.acc2-sp{font-size:10.5px;padding:2px 8px;border-radius:99px;font-weight:700;background:rgba(74,168,255,.16);color:var(--sa-accent)}
+.acc2-sp.b{background:rgba(192,132,252,.18);color:#c084fc}.acc2-sp.g{background:rgba(148,163,184,.2);color:var(--sa-sub)}
+.acc2-bar{height:6px;border-radius:99px;background:rgba(127,150,190,.2);overflow:hidden;margin-top:4px}
+.acc2-bar i{display:block;height:100%;border-radius:99px}.acc2-bar i.ok{background:var(--sa-ok)}.acc2-bar i.low{background:var(--sa-warn)}.acc2-bar i.out{background:var(--sa-bad)}
+.acc2-prices{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--sa-sub);margin-top:6px}
+.acc2-prices b{color:var(--sa-text);font-size:14px}.acc2-prices em{font-style:normal;color:var(--sa-ok);font-weight:700}.acc2-prices em.neg{color:var(--sa-bad)}
+.acc2-act{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.acc2-act button,.acc2-adj button{all:unset;cursor:pointer;box-sizing:border-box;flex:1;min-width:60px;text-align:center;font-size:11.5px;padding:8px 4px;border-radius:10px;background:var(--sa-card2);border:1px solid var(--sa-line);color:var(--sa-text)}
+.acc2-act .in{border-color:var(--sa-ok);color:var(--sa-ok)}.acc2-act .out{border-color:var(--sa-warn);color:var(--sa-warn)}.acc2-act .del{flex:0 0 38px;min-width:38px;color:var(--sa-bad)}
+.acc2-adj{display:flex;gap:6px;margin-top:8px}
+.acc2-adj input{flex:2;min-width:0;border:1px solid var(--sa-accent) !important;background:var(--sa-card2) !important;color:var(--sa-text) !important;border-radius:10px !important;padding:8px 10px !important;font-size:13px}
+.acc2-formhead{display:flex;justify-content:space-between;align-items:center;border-radius:20px;padding:14px;color:#fff}
+.acc2-formhead small{font-size:11px;letter-spacing:.12em;opacity:.85}.acc2-formhead h3{margin:2px 0;font-size:20px;color:#fff}.acc2-formhead p{margin:0;font-size:12px;opacity:.9}
+.acc2-form{display:flex;flex-direction:column;gap:12px}
+.acc2-moves{background:var(--sa-card);border:1px solid var(--sa-line);border-radius:18px;padding:12px}
+.acc2-moves h4{margin:0 0 8px;font-size:13px;color:var(--sa-sub)}
+.acc2-move{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--sa-line);font-size:12.5px}.acc2-move:last-child{border:0}
+.dv-xhead{margin:12px 0 8px;padding-top:10px;border-top:1px dashed var(--sa-line);font-weight:700;font-size:13px;color:var(--sa-accent)}
+.dv-extra .dv-f{margin-bottom:10px}
+/* keep the app's generic section-button styling from repainting the accessory controls */
+.acc2 button{box-shadow:none !important;text-shadow:none !important;min-height:0}
+.acc2 .dv-ch{background:var(--sa-card2) !important;color:var(--sa-sub) !important;border:1px solid var(--sa-line) !important;border-radius:999px !important;padding:8px 12px !important;font-weight:500 !important}
+.acc2 .dv-ch.on{background:rgba(74,168,255,.18) !important;color:var(--sa-accent) !important;border-color:var(--sa-accent) !important;font-weight:700 !important}
+.acc2 .dv-x{background:rgba(255,255,255,.22) !important;color:#fff !important;border:0 !important;border-radius:12px !important;width:34px !important;height:34px !important;padding:0 !important}
+.acc2 .dv-btn:not(.dv-main){background:var(--sa-card2) !important;color:var(--sa-text) !important;border:1px solid var(--sa-line) !important;border-radius:15px !important}
+.acc2 .dv-btn.dv-main{color:#fff !important;border:0 !important;border-radius:15px !important}
+.acc2 .dv-addbig{color:#fff !important;border:0 !important;border-radius:16px !important}
+.acc2 .dv-step button{background:rgba(127,150,190,.18) !important;color:var(--sa-text) !important;border:0 !important;border-radius:10px !important;padding:0 !important}
+.acc2 .dv-pho.add{background:transparent !important;border:1.5px dashed var(--sa-accent) !important;color:var(--sa-accent) !important;border-radius:12px !important;padding:0 !important}
+.acc2 .dv-pho button:not(.add){background:rgba(0,0,0,.65) !important;color:#fff !important;border:0 !important;padding:0 !important;border-radius:50% !important}
+.acc2 .acc2-cat{background:var(--sa-card) !important;border:1px solid var(--sa-line) !important;color:var(--sa-text) !important;border-radius:20px !important}
+.acc2 .acc2-back{background:transparent !important;border:0 !important;color:var(--sa-accent) !important;padding:4px 2px !important}
+.acc2 .acc2-act button,.acc2 .acc2-adj button{background:var(--sa-card2) !important;color:var(--sa-text) !important;border:1px solid var(--sa-line) !important;border-radius:10px !important;padding:8px 4px !important}
+.acc2 .acc2-act .in{border-color:var(--sa-ok) !important;color:var(--sa-ok) !important}.acc2 .acc2-act .out{border-color:var(--sa-warn) !important;color:var(--sa-warn) !important}.acc2 .acc2-act .del{color:var(--sa-bad) !important}
+.acc2 .dv-f input:not([type=checkbox]):not([type=file]){border:1px solid var(--sa-line) !important;background:var(--sa-card2) !important;color:var(--sa-text) !important;border-radius:13px !important}
+.acc2 .dv-step input{border:0 !important;background:transparent !important}
