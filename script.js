@@ -24658,3 +24658,441 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
     later();
   });
 })();
+
+/* =========================================================
+   ACT DEVICE CATALOG
+   Devices section: "أجهزة مستعملة" + "أجهزة جديدة" tabs, stats strip,
+   and ID-card photos (front/back) for every person form in the section.
+   Stored per user (local + cloud) under actPhoneManager_*_<uid> keys.
+========================================================= */
+(function actDeviceCatalog(){
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const fmt = v => (Math.round(num(v) * 100) / 100).toLocaleString('en-US');
+  const uid = () => (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) ? currentUser.uid : 'guest';
+  const KEY = { used: () => 'actPhoneManager_usedDevices_' + uid(), new: () => 'actPhoneManager_newDevices_' + uid(), ids: () => 'actPhoneManager_idcards_' + uid() };
+  const KIND = { used: { tab: 'device-used-tab', sec: 'phone-used-section', label: 'مستعمل', icon: '♻️', grad: 'linear-gradient(135deg,#7c3aed,#c084fc)' }, new: { tab: 'device-new-tab', sec: 'phone-new-section', label: 'جديد', icon: '✨', grad: 'linear-gradient(135deg,#059669,#34d399)' } };
+  const STATUS = { available: ['متاح', 't-ok'], reserved: ['محجوز', 't-warn'], sold: ['مباع', 't-gray'], repair: ['صيانة', 't-bad'] };
+  const GRADES = ['ممتاز', 'جيد جدًا', 'جيد', 'مقبول'];
+  const ACCS = ['📦 كرتونة', '🔌 شاحن', '🎧 سماعة', '📃 فاتورة', '🛡️ جراب'];
+  const STATES = ['🔒 متقفل بالكرتونة', '📦 مفتوح', '🧪 عرض'];
+  const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+
+  /* ---------- storage ---------- */
+  function readList(k){ try { const v = JSON.parse(localStorage.getItem(k) || '[]'); return Array.isArray(v) ? v : []; } catch (_) { return []; } }
+  function readMap(k){ try { const v = JSON.parse(localStorage.getItem(k) || '{}'); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; } catch (_) { return {}; } }
+  function write(k, val){
+    const s = JSON.stringify(val);
+    try { localStorage.setItem(k, s); } catch (_) { alert('مساحة التخزين ممتلئة. احذف بعض الصور القديمة أو قلّل عدد الصور.'); return false; }
+    try { saveUserDataToCloud(k, s); } catch (_) {}
+    return true;
+  }
+  const items = kind => readList(KEY[kind]());
+  const saveItems = (kind, list) => write(KEY[kind](), list);
+  const idMap = () => readMap(KEY.ids());
+  const saveIdMap = m => write(KEY.ids(), m);
+
+  /* ---------- images ---------- */
+  function readImage(file, max, quality){
+    return new Promise(resolve => {
+      if (!file || !file.type || !file.type.startsWith('image/')) { alert('اختر صورة صالحة.'); resolve(''); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, max / Math.max(img.width, img.height));
+          const c = document.createElement('canvas'); c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          resolve(c.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = () => resolve('');
+        img.src = reader.result;
+      };
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /* ---------- state of the two forms ---------- */
+  const st = { used: blank('used'), new: blank('new') };
+  const filt = { used: { q: '', s: 'all' }, new: { q: '', s: 'all' } };
+  function blank(kind){ return { editing: null, grade: 'ممتاز', acc: [], state: STATES[0], photos: [], invoice: '', idFront: '', idBack: '', qty: 1 }; }
+
+  /* ---------- duplicate IMEI ---------- */
+  function imeiClash(imei, selfId){
+    const v = String(imei || '').trim(); if (!v) return '';
+    if (items('used').some(x => x.imei === v && x.id !== selfId)) return 'مستعمل';
+    if (items('new').some(x => x.imei === v && x.id !== selfId)) return 'جديد';
+    try { if ((Array.isArray(devices) ? devices : []).some(d => String(d.serialNumber || d.serial || '').trim() === v && !(d.catalogId && d.catalogId === selfId))) return 'بيع التلفونات'; } catch (_) {}
+    try { if ((Array.isArray(phonePurchases) ? phonePurchases : []).some(p => String(p.serial || '').trim() === v)) return 'مشتريات التلفونات'; } catch (_) {}
+    return '';
+  }
+
+  /* ---------- sale list link ---------- */
+  function listInSale(item){
+    if (typeof devices === 'undefined' || !Array.isArray(devices)) return;
+    const qty = item.kind === 'new' ? Math.max(1, Math.floor(num(item.qty) || 1)) : 1; const ids = [];
+    for (let n = 0; n < qty; n++) {
+      const id = 'device-cat-' + item.id + '-' + n + '-' + Math.random().toString(36).slice(2, 6);
+      devices.unshift({ id, phoneName: item.name, serialNumber: qty === 1 ? (item.imei || '') : '', serial: qty === 1 ? (item.imei || '') : '', price: num(item.sellPrice), phonePrice: num(item.sellPrice), purchasePrice: num(item.buyPrice), boxIncluded: !(item.accessories && item.accessories.length && !item.accessories.some(a => a.includes('كرتونة'))), notes: 'من قسم أجهزة ' + KIND[item.kind].label + (item.sellerName ? ' · ' + item.sellerName : ''), status: 'البيع', category: SECTIONS.SALE, section: 'sale', date: today(), createdAt: new Date().toISOString(), catalogId: item.id });
+      ids.push(id);
+    }
+    item.listedIds = (item.listedIds || []).concat(ids);
+    try { saveDevices(); renderSaleDevices(); } catch (_) {}
+  }
+  function unlist(item){
+    if (typeof devices === 'undefined' || !Array.isArray(devices) || !(item.listedIds || []).length) return;
+    const ids = new Set(item.listedIds); devices = devices.filter(d => !ids.has(d.id)); item.listedIds = [];
+    try { saveDevices(); renderSaleDevices(); } catch (_) {}
+  }
+  function syncListed(item){
+    if (typeof devices === 'undefined' || !Array.isArray(devices) || !(item.listedIds || []).length) return;
+    const ids = new Set(item.listedIds);
+    devices.forEach(d => { if (ids.has(d.id)) { d.phoneName = item.name; d.price = num(item.sellPrice); d.phonePrice = num(item.sellPrice); d.purchasePrice = num(item.buyPrice); if (item.kind === 'used' || num(item.qty) <= 1) { d.serialNumber = item.imei || ''; d.serial = item.imei || ''; } } });
+    try { saveDevices(); renderSaleDevices(); } catch (_) {}
+  }
+  // an item that was listed becomes "sold" once its sale records left the list (invoice sale), and comes back after a working return
+  function reconcile(){
+    if (typeof devices === 'undefined' || !Array.isArray(devices)) return;
+    ['used', 'new'].forEach(kind => {
+      const list = items(kind); let changed = false;
+      list.forEach(it => {
+        if (!(it.listedIds || []).length) return;
+        const present = it.listedIds.filter(id => devices.some(d => d.id === id)).length;
+        const total = it.listedIds.length; const sold = total - present;
+        if (kind === 'new') { if ((it.soldCount || 0) !== sold) { it.soldCount = sold; changed = true; } }
+        if (present === 0 && it.status !== 'sold') { it.status = 'sold'; changed = true; }
+        if (present > 0 && it.status === 'sold') { it.status = 'available'; changed = true; }
+      });
+      if (changed) saveItems(kind, list);
+    });
+  }
+
+  /* ---------- form markup ---------- */
+  const chips = (grp, list, sel) => '<div class="dv-chips">' + list.map(v => '<button type="button" class="dv-ch' + ((Array.isArray(sel) ? sel.includes(v) : sel === v) ? ' on' : '') + '" data-grp="' + grp + '" data-val="' + esc(v) + '">' + esc(v) + '</button>').join('') + '</div>';
+  const fld = (label, key, ph, type, extra) => '<div class="dv-f"><label>' + label + '</label><input data-k="' + key + '" type="' + (type || 'text') + '" placeholder="' + esc(ph || '') + '" ' + (extra || '') + ' autocomplete="off"></div>';
+  const idBox = (side, label) => '<div class="dv-idbox" data-idslot="' + side + '"><div class="dv-idprev"><span>📷</span></div><b>' + label + '</b><small>تصوير بالكاميرا أو من المعرض</small><input type="file" accept="image/*" hidden data-pick="id-' + side + '"></div>';
+  const photosBlock = (label) => '<div class="dv-f"><label>' + label + '</label><div class="dv-photos" data-photos></div><input type="file" accept="image/*" multiple hidden data-pick="photos"></div>';
+  function formHtml(kind){
+    const used = kind === 'used';
+    return '<div class="dv-formhead" style="background:' + KIND[kind].grad + '"><div><small>' + (used ? 'USED DEVICE' : 'NEW DEVICE') + '</small><h3>' + KIND[kind].icon + ' ' + (used ? 'إضافة جهاز مستعمل' : 'إضافة جهاز جديد') + '</h3><p data-formsub>' + (used ? 'بيانات الجهاز والبائع وصور البطاقة' : 'جهاز بالضمان من المورد') + '</p></div><button type="button" class="dv-x" data-dv-close="' + kind + '" aria-label="إغلاق">✕</button></div>' +
+      '<div class="dv-card"><div class="dv-ch-h"><span class="dv-ci" style="background:linear-gradient(135deg,#2563eb,#38bdf8)">📱</span><div><strong>بيانات الجهاز</strong><small>الاسم والسيريال والمواصفات</small></div></div>' +
+        fld('اسم الجهاز', 'name', '📱 مثال: iPhone 12') +
+        '<div class="dv-f"><label>سيريال / IMEI</label><input data-k="imei" type="text" inputmode="numeric" placeholder="🔢 السيريال أو IMEI" autocomplete="off"><small class="dv-imei" hidden></small></div>' +
+        '<div class="dv-r2">' + fld('السعة', 'storage', '128GB') + fld('اللون', 'color', '⚫ اللون') + '</div>' +
+        (used
+          ? '<div class="dv-f"><label>حالة الجهاز</label>' + chips('grade', GRADES, 'ممتاز') + '</div><div class="dv-r2">' + fld('صحة البطارية %', 'battery', '🔋 مثال: 91', 'number', 'min="0" max="100" inputmode="numeric"') + fld('الضمان المتبقي', 'warranty', '🛡️ بدون') + '</div><div class="dv-f"><label>المرفقات</label>' + chips('acc', ACCS, []) + '</div>' + fld('عيوب الجهاز', 'defects', '⚠️ خدوش أو عيوب')
+          : '<div class="dv-r2"><div class="dv-f"><label>الكمية</label><div class="dv-step"><button type="button" data-dv-step="1">＋</button><input data-k="qty" type="number" min="1" step="1" value="1" inputmode="numeric"><button type="button" data-dv-step="-1">−</button></div></div>' + fld('الضمان', 'warranty', '🛡️ مثال: سنة') + '</div><div class="dv-f"><label>الحالة</label>' + chips('state', STATES, STATES[0]) + '</div>') +
+      '</div>' +
+      (used
+        ? '<div class="dv-card"><div class="dv-ch-h"><span class="dv-ci" style="background:linear-gradient(135deg,#7c3aed,#c084fc)">👤</span><div><strong>بيانات البائع</strong><small>اللي اشتريت منه الجهاز</small></div></div>' + fld('اسم البائع', 'sellerName', '👤 اسم البائع') + '<div class="dv-r2">' + fld('رقم الهاتف', 'sellerPhone', '📞 رقم الهاتف', 'tel') + fld('الرقم القومي', 'nationalId', '🪪 14 رقم', 'text', 'inputmode="numeric" maxlength="14"') + '</div><div class="dv-f"><label>صورة البطاقة (وش وضهر)</label><div class="dv-idrow">' + idBox('front', 'الوجه') + idBox('back', 'الظهر') + '</div></div><div class="dv-lock">🔒 صور البطاقات مخفية في القوائم، وبتظهر بس لما تضغط «🪪 البطاقة».</div></div>'
+        : '<div class="dv-card"><div class="dv-ch-h"><span class="dv-ci" style="background:linear-gradient(135deg,#7c3aed,#c084fc)">🏢</span><div><strong>المورد</strong><small>اللي اشتريت منه</small></div></div>' + fld('اسم المورد / الشركة', 'supplierName', '🏢 اسم المورد') + '<div class="dv-r2">' + fld('رقم المورد', 'supplierPhone', '📞 رقم الهاتف', 'tel') + fld('رقم فاتورة الشراء', 'invoiceNo', '🧾 رقم الفاتورة') + '</div><div class="dv-f"><label>صورة فاتورة المورد</label><div class="dv-photos" data-invoice></div><input type="file" accept="image/*" hidden data-pick="invoice"></div></div>') +
+      '<div class="dv-card"><div class="dv-ch-h"><span class="dv-ci" style="background:linear-gradient(135deg,#ea580c,#fbbf24)">💰</span><div><strong>الأسعار والصور</strong><small>الربح بيتحسب لوحده</small></div></div>' +
+        '<div class="dv-r2">' + fld(used ? 'سعر الشراء' : 'سعر الشراء (للقطعة)', 'buyPrice', '💵 سعر الشراء', 'number', 'min="0" step="0.01" inputmode="decimal"') + fld(used ? 'سعر البيع المتوقع' : 'سعر البيع', 'sellPrice', '🏷️ سعر البيع', 'number', 'min="0" step="0.01" inputmode="decimal"') + '</div>' +
+        '<div class="dv-profit"><span data-profit-label>الربح المتوقع</span><b data-profit>0 ج</b></div>' +
+        photosBlock('صور الجهاز (حتى 5)') +
+        (used ? fld('تاريخ الشراء', 'buyDate', '', 'date') : '') +
+        '<div class="dv-f"><label>ملاحظات</label><textarea data-k="notes" rows="3" placeholder="📝 ملاحظات"></textarea></div></div>' +
+      '<label class="dv-toggle"><input type="checkbox" data-k="autoList" checked><span class="dv-sw"></span>🛒 أضيفه تلقائيًا لقسم «بيع التلفونات» عشان يتباع بالفاتورة</label>' +
+      '<div class="dv-acts"><button type="button" class="dv-btn" data-dv-close="' + kind + '">إلغاء</button><button type="button" class="dv-btn dv-main" data-dv-save="' + kind + '" style="background:' + KIND[kind].grad + '">💾 ' + (used ? 'حفظ الجهاز المستعمل' : 'حفظ الجهاز الجديد') + '</button></div>';
+  }
+  function sectionHtml(kind){
+    const used = kind === 'used';
+    return '<div class="dv-search"><span>🔎</span><input type="search" data-dv-search="' + kind + '" placeholder="ابحث بالاسم أو IMEI أو ' + (used ? 'اسم البائع' : 'اسم المورد') + '"></div>' +
+      '<div class="dv-chips dv-filters" data-dv-filters="' + kind + '">' + [['all', 'الكل'], ['available', 'متاح'], ['reserved', 'محجوز'], ['sold', 'مباع'], ['repair', '🔧 صيانة']].map(f => '<button type="button" class="dv-ch' + (f[0] === 'all' ? ' on' : '') + '" data-flt="' + f[0] + '">' + f[1] + ' <em></em></button>').join('') + '</div>' +
+      '<button type="button" class="dv-addbig" data-dv-add="' + kind + '" style="background:' + KIND[kind].grad + '">＋ ' + (used ? 'إضافة جهاز مستعمل' : 'إضافة جهاز جديد') + '</button>' +
+      '<div class="dv-form" id="dv-form-' + kind + '" hidden></div><div class="dv-list" id="dv-list-' + kind + '"></div>';
+  }
+
+  /* ---------- build UI ---------- */
+  function build(){
+    const tabs = document.querySelector('.device-sub-tabs'); const purchases = $('phone-purchases-section');
+    if (!tabs || !purchases || $('device-used-tab')) return;
+    const mk = (kind, text) => { const b = document.createElement('button'); b.id = KIND[kind].tab; b.type = 'button'; b.className = 'device-sub-tab'; b.innerHTML = '<span>' + KIND[kind].icon + '</span><strong>' + text + '</strong><small>0 جهاز</small><em class="dv-new">جديد</em>'; return b; };
+    tabs.append(mk('used', 'أجهزة مستعملة'), mk('new', 'أجهزة جديدة'));
+    const stats = document.createElement('div'); stats.id = 'dv-stats'; tabs.after(stats);
+    let anchor = purchases;
+    ['used', 'new'].forEach(kind => { const sec = document.createElement('div'); sec.id = KIND[kind].sec; sec.className = 'dv-sec'; sec.style.display = 'none'; sec.innerHTML = sectionHtml(kind); anchor.after(sec); anchor = sec; $('dv-form-' + kind).innerHTML = formHtml(kind); });
+    regroupForms();
+    injectIdPickers();
+    const modal = document.createElement('div'); modal.id = 'dv-id-modal'; modal.className = 'dv-modal'; modal.hidden = true; modal.innerHTML = '<div class="dv-sheet"></div>'; document.body.appendChild(modal);
+    refreshAll();
+  }
+
+  /* ---------- re-arrange the existing sale / purchase forms into cards (same fields, same ids) ---------- */
+  function regroup(formId, cards){
+    const form = $(formId); if (!form || form.dataset.dvGrouped) return; form.dataset.dvGrouped = '1';
+    const anchor = form.querySelector('.form-grid'); if (!anchor) return;
+    const made = [];
+    cards.forEach(c => {
+      const card = document.createElement('div'); card.className = 'dv-card';
+      card.innerHTML = '<div class="dv-ch-h"><span class="dv-ci" style="background:' + c.grad + '">' + c.icon + '</span><div><strong>' + c.title + '</strong><small>' + c.sub + '</small></div></div><div class="dv-grid"></div>' + (c.slot ? '<div id="dv-id-slot-' + c.slot + '"></div>' : '');
+      const grid = card.querySelector('.dv-grid');
+      c.ids.forEach(id => { const el = $(id); const g = el && el.closest('.form-group'); if (g) grid.appendChild(g); });
+      made.push(card);
+    });
+    anchor.before(...made);
+    const lastGrid = made[made.length - 1].querySelector('.dv-grid');
+    form.querySelectorAll('.form-group').forEach(g => { if (!g.closest('.dv-card')) lastGrid.appendChild(g); });
+    form.querySelectorAll('.form-grid').forEach(g => { if (!g.querySelector('.form-group')) g.style.display = 'none'; });
+  }
+  function regroupForms(){
+    regroup('device-form', [
+      { icon: '📱', grad: 'linear-gradient(135deg,#2563eb,#38bdf8)', title: 'بيانات الجهاز', sub: 'الاسم والعيب والكرتونة', ids: ['phone-name', 'problem', 'changed-parts'] },
+      { icon: '👤', grad: 'linear-gradient(135deg,#7c3aed,#c084fc)', title: 'صاحب الجهاز', sub: 'الاسم وموعد الاستلام وصورة البطاقة', ids: ['customer-name', 'receive-date', 'receive-time'], slot: 'device' },
+      { icon: '💰', grad: 'linear-gradient(135deg,#ea580c,#fbbf24)', title: 'السعر والصور', sub: 'سعر الجهاز وصورته وملاحظاتك', ids: ['price', 'device-photo-input', 'notes'] }
+    ]);
+    regroup('phone-purchase-form', [
+      { icon: '📱', grad: 'linear-gradient(135deg,#2563eb,#38bdf8)', title: 'بيانات الجهاز', sub: 'الاسم والسيريال والكرتونة', ids: ['purchase-phone-name', 'purchase-serial', 'purchase-box-included'] },
+      { icon: '👤', grad: 'linear-gradient(135deg,#7c3aed,#c084fc)', title: 'بيانات البائع', sub: 'اللي اشتريت منه وصورة بطاقته', ids: ['purchase-seller-name', 'purchase-seller-phone'], slot: 'purchase' },
+      { icon: '💰', grad: 'linear-gradient(135deg,#ea580c,#fbbf24)', title: 'السعر والصور', sub: 'سعر الشراء والتاريخ والصورة', ids: ['purchase-price', 'purchase-date', 'purchase-device-photo', 'purchase-notes'] }
+    ]);
+    const serial = $('purchase-serial');
+    if (serial && !$('dv-purchase-imei')) { const h = document.createElement('small'); h.id = 'dv-purchase-imei'; h.className = 'dv-imei'; h.hidden = true; serial.after(h); }
+  }
+  function purchaseSerialHint(){
+    const el = $('dv-purchase-imei'), inp = $('purchase-serial'); if (!el || !inp) return;
+    const v = String(inp.value || '').trim(); if (!v) { el.hidden = true; return; }
+    let clash = '';
+    if (items('used').some(x => x.imei === v)) clash = 'أجهزة مستعملة'; else if (items('new').some(x => x.imei === v)) clash = 'أجهزة جديدة';
+    else { try { const own = typeof editingPurchaseId !== 'undefined' ? editingPurchaseId : null; if ((phonePurchases || []).some(p => String(p.serial || '').trim() === v && String(p.cardId || p.id) !== String(own))) clash = 'مشتريات التلفونات'; } catch (_) {} }
+    el.hidden = false; el.className = 'dv-imei ' + (clash ? 'bad' : 'ok'); el.textContent = clash ? '⚠️ السيريال ده موجود قبل كده في: ' + clash : '✓ غير مكرر';
+  }
+
+  /* ---------- ID pickers inside the existing sale / purchase forms ---------- */
+  const pend = { device: { front: '', back: '' }, purchase: { front: '', back: '' } };
+  function injectIdPickers(){
+    [['device-photo-input', 'device'], ['purchase-device-photo', 'purchase']].forEach(([inputId, form]) => {
+      const input = $(inputId); if (!input || document.querySelector('.dv-idpair[data-form="' + form + '"]')) return;
+      const slotEl = $('dv-id-slot-' + form);
+      const host = slotEl || input.closest('.form-group, .field, .sales-field, .device-field') || input.parentElement;
+      const box = document.createElement('div'); box.className = 'dv-idpair dv-f'; box.dataset.form = form;
+      box.innerHTML = '<label>🪪 صورة البطاقة (وش وضهر)</label><div class="dv-idrow">' + idBox('front', 'الوجه').replace('data-idslot', 'data-form="' + form + '" data-idslot') + idBox('back', 'الظهر').replace('data-idslot', 'data-form="' + form + '" data-idslot') + '</div><div class="dv-lock">🔒 بتتحفظ مع الجهاز وبتظهر بس بزر «🪪 البطاقة».</div>';
+      if (slotEl) slotEl.appendChild(box); else host.after(box);
+    });
+  }
+  function setIdPreview(slot, src){
+    const prev = slot.querySelector('.dv-idprev'); if (!prev) return;
+    prev.innerHTML = src ? '<img alt="" src="' + src + '">' : '<span>📷</span>'; slot.classList.toggle('has', !!src);
+    const sm = slot.querySelector('small'); if (sm) sm.textContent = src ? 'اتصورت ✓ · اضغط للتغيير' : 'تصوير بالكاميرا أو من المعرض';
+  }
+  function resetPending(form){ pend[form] = { front: '', back: '' }; document.querySelectorAll('.dv-idpair[data-form="' + form + '"] [data-idslot]').forEach(s => setIdPreview(s, '')); }
+
+  /* ---------- rendering ---------- */
+  function statusSel(it){ return '<select class="dv-stat ' + STATUS[it.status || 'available'][1] + '" data-dv-status="' + esc(it.id) + '">' + Object.keys(STATUS).map(k => '<option value="' + k + '"' + ((it.status || 'available') === k ? ' selected' : '') + '>' + STATUS[k][0] + '</option>').join('') + '</select>'; }
+  function remaining(it){ return it.kind === 'new' ? Math.max(0, Math.floor(num(it.qty) || 1) - num(it.soldCount)) : 1; }
+  function render(kind){
+    const host = $('dv-list-' + kind); if (!host) return;
+    const all = items(kind); const f = filt[kind]; const q = f.q.trim().toLocaleLowerCase('ar'); const map = idMap();
+    const matches = all.filter(it => !q || [it.name, it.imei, it.sellerName, it.supplierName, it.color, it.storage].some(v => String(v || '').toLocaleLowerCase('ar').includes(q)));
+    const shown = matches.filter(it => f.s === 'all' || (it.status || 'available') === f.s);
+    const fb = document.querySelector('[data-dv-filters="' + kind + '"]');
+    if (fb) fb.querySelectorAll('[data-flt]').forEach(b => { b.classList.toggle('on', b.dataset.flt === f.s); const em = b.querySelector('em'); if (em) em.textContent = b.dataset.flt === 'all' ? matches.length : matches.filter(it => (it.status || 'available') === b.dataset.flt).length; });
+    if (!shown.length) { host.innerHTML = '<div class="dv-empty">' + (all.length ? 'مفيش نتائج مطابقة.' : 'لسه مفيش أجهزة ' + KIND[kind].label + 'ة. اضغط «إضافة» وابدأ.') + '</div>'; return; }
+    host.innerHTML = shown.map(it => {
+      const profit = num(it.sellPrice) - num(it.buyPrice); const st1 = it.status || 'available';
+      const tags = (kind === 'used'
+        ? [it.grade ? '<span class="dv-tag t-ok">' + esc(it.grade) + '</span>' : '', it.battery ? '<span class="dv-tag t-blue">بطارية ' + esc(it.battery) + '%</span>' : '', it.defects ? '<span class="dv-tag t-bad">' + esc(it.defects) + '</span>' : '', (it.accessories || []).some(a => a.includes('كرتونة')) ? '<span class="dv-tag t-gray">بكرتونة</span>' : '<span class="dv-tag t-gray">من غير كرتونة</span>']
+        : ['<span class="dv-tag t-ok">' + esc(it.state || '') + '</span>', it.warranty ? '<span class="dv-tag t-blue">ضمان ' + esc(it.warranty) + '</span>' : '', '<span class="dv-tag t-gray">متبقي ' + remaining(it) + ' من ' + Math.max(1, Math.floor(num(it.qty) || 1)) + '</span>']).join('');
+      const hasId = !!map['used:' + it.id];
+      return '<article class="dv-dev"><div class="dv-ph" style="background:' + KIND[kind].grad + '">' + (it.photos && it.photos[0] ? '<img alt="" src="' + it.photos[0] + '">' : '📱') + '</div><div class="dv-dm"><div class="dv-dtop"><b>' + esc(it.name) + (it.storage ? ' · ' + esc(it.storage) : '') + '</b>' + statusSel(it) + '</div><small>' + (it.imei ? 'IMEI ' + esc(it.imei) : 'بدون IMEI') + (it.color ? ' · ' + esc(it.color) : '') + '</small><div class="dv-tags">' + tags + '</div>' +
+        '<div class="dv-prices"><span>شراء ' + fmt(it.buyPrice) + (kind === 'used' && it.sellerName ? ' · ' + esc(it.sellerName) : '') + (kind === 'new' && it.supplierName ? ' · ' + esc(it.supplierName) : '') + '</span><b>' + fmt(it.sellPrice) + ' ج</b></div><div class="dv-prices"><span>ربح</span><em class="' + (profit < 0 ? 'neg' : '') + '">' + (profit >= 0 ? '+ ' : '− ') + fmt(Math.abs(profit)) + ' ج' + (kind === 'new' && remaining(it) > 1 ? ' × ' + remaining(it) : '') + '</em></div>' +
+        '<div class="dv-dact"><button type="button" data-dv-edit="' + kind + ':' + esc(it.id) + '">✏️ تعديل</button>' + (kind === 'used' ? '<button type="button" class="' + (hasId ? 'has' : '') + '" data-dv-idopen="used:' + esc(it.id) + '">🪪 البطاقة' + (hasId ? ' ✓' : '') + '</button>' : '') +
+        ((it.listedIds || []).length && st1 !== 'sold' ? '<button type="button" class="on" data-dv-unlist="' + kind + ':' + esc(it.id) + '">✓ معروض للبيع</button>' : (st1 === 'sold' ? '' : '<button type="button" data-dv-list="' + kind + ':' + esc(it.id) + '">🛒 بيع</button>')) +
+        '<button type="button" class="del" data-dv-del="' + kind + ':' + esc(it.id) + '" aria-label="حذف">🗑️</button></div></div></article>';
+    }).join('');
+  }
+  function stats(){
+    const box = $('dv-stats'); if (!box) return;
+    let saleCount = 0, saleValue = 0, purchases = 0;
+    try { (Array.isArray(devices) ? devices : []).forEach(d => { if (d.section === 'sale' || d.category === SECTIONS.SALE || d.status === 'البيع') { saleCount++; saleValue += num(d.price) || num(d.phonePrice); } }); purchases = (Array.isArray(phonePurchases) ? phonePurchases : []).length; } catch (_) {}
+    const used = items('used').filter(x => (x.status || 'available') !== 'sold'); const nw = items('new');
+    const newLeft = nw.reduce((t, x) => t + remaining(x), 0);
+    const unlistedValue = used.filter(x => !(x.listedIds || []).length).reduce((t, x) => t + num(x.sellPrice), 0) + nw.filter(x => !(x.listedIds || []).length).reduce((t, x) => t + num(x.sellPrice) * remaining(x), 0);
+    box.innerHTML = '<div class="dv-tile b1"><span>معروض للبيع</span><b>' + saleCount + '</b></div><div class="dv-tile b2"><span>مستعمل</span><b>' + used.length + '</b></div><div class="dv-tile b3"><span>جديد</span><b>' + newLeft + '</b></div><div class="dv-tile b4"><span>قيمة المخزون</span><b>' + fmt(saleValue + unlistedValue) + '</b></div>';
+    const set = (id, t) => { const b = $(id); const sm = b && b.querySelector('small'); if (sm) sm.textContent = t; };
+    set('device-sale-tab', saleCount + ' جهاز'); set('device-purchase-tab', purchases + ' عملية'); set('device-used-tab', used.length + ' جهاز'); set('device-new-tab', newLeft + ' جهاز');
+  }
+  function refreshAll(){ if (!$('device-used-tab')) return; reconcile(); render('used'); render('new'); stats(); }
+
+  /* ---------- form helpers ---------- */
+  const formEl = kind => $('dv-form-' + kind);
+  const val = (kind, k) => { const el = formEl(kind).querySelector('[data-k="' + k + '"]'); return el ? (el.type === 'checkbox' ? el.checked : el.value) : ''; };
+  const setVal = (kind, k, v) => { const el = formEl(kind).querySelector('[data-k="' + k + '"]'); if (el) { if (el.type === 'checkbox') el.checked = !!v; else el.value = v == null ? '' : v; } };
+  function paintForm(kind){
+    const f = formEl(kind), s = st[kind];
+    f.querySelectorAll('.dv-ch[data-grp]').forEach(b => { const g = b.dataset.grp; b.classList.toggle('on', g === 'acc' ? s.acc.includes(b.dataset.val) : s[g] === b.dataset.val); });
+    const ph = f.querySelector('[data-photos]'); if (ph) ph.innerHTML = s.photos.map((p, i) => '<div class="dv-pho"><img alt="" src="' + p + '"><button type="button" data-dv-rmphoto="' + i + '" aria-label="حذف">×</button></div>').join('') + (s.photos.length < 5 ? '<button type="button" class="dv-pho add" data-dv-pickphotos>＋</button>' : '');
+    const inv = f.querySelector('[data-invoice]'); if (inv) inv.innerHTML = (s.invoice ? '<div class="dv-pho"><img alt="" src="' + s.invoice + '"><button type="button" data-dv-rminvoice aria-label="حذف">×</button></div>' : '') + '<button type="button" class="dv-pho add" data-dv-pickinvoice>＋</button>';
+    f.querySelectorAll('[data-idslot]').forEach(sl => setIdPreview(sl, sl.dataset.idslot === 'front' ? s.idFront : s.idBack));
+    profit(kind);
+  }
+  function profit(kind){
+    const f = formEl(kind); const buy = num(val(kind, 'buyPrice')), sell = num(val(kind, 'sellPrice')); const qty = kind === 'new' ? Math.max(1, Math.floor(num(val(kind, 'qty')) || 1)) : 1;
+    const p = sell - buy; const b = f.querySelector('[data-profit]'); if (b) { b.textContent = (p >= 0 ? '+ ' : '− ') + fmt(Math.abs(p) * qty) + ' ج'; b.parentElement.classList.toggle('neg', p < 0); }
+    const lab = f.querySelector('[data-profit-label]'); if (lab) lab.textContent = kind === 'new' && qty > 1 ? 'الربح للقطعة × ' + qty : 'الربح المتوقع';
+  }
+  function imeiHint(kind){
+    const f = formEl(kind); const el = f.querySelector('.dv-imei'); if (!el) return;
+    const v = String(val(kind, 'imei') || '').trim(); if (!v) { el.hidden = true; return; }
+    const clash = imeiClash(v, st[kind].editing); el.hidden = false; el.className = 'dv-imei ' + (clash ? 'bad' : 'ok'); el.textContent = clash ? '⚠️ السيريال ده موجود قبل كده في: ' + clash : '✓ غير مكرر';
+  }
+  function openForm(kind, id){
+    const f = formEl(kind); const s = st[kind] = blank(kind);
+    f.querySelectorAll('input[data-k],textarea[data-k]').forEach(el => { if (el.type === 'checkbox') el.checked = true; else el.value = el.type === 'number' && el.dataset.k === 'qty' ? '1' : ''; });
+    setVal(kind, 'buyDate', today());
+    if (id) {
+      const it = items(kind).find(x => x.id === id);
+      if (it) {
+        s.editing = id; s.grade = it.grade || 'ممتاز'; s.acc = (it.accessories || []).slice(); s.state = it.state || STATES[0]; s.photos = (it.photos || []).slice(); s.invoice = it.invoicePhoto || '';
+        ['name', 'imei', 'storage', 'color', 'battery', 'warranty', 'defects', 'sellerName', 'sellerPhone', 'nationalId', 'buyPrice', 'sellPrice', 'notes', 'qty', 'supplierName', 'supplierPhone', 'invoiceNo', 'buyDate'].forEach(k => { if (it[k] != null) setVal(kind, k, it[k]); });
+        setVal(kind, 'autoList', true);
+        const idc = idMap()['used:' + id]; if (idc) { s.idFront = idc.front || ''; s.idBack = idc.back || ''; }
+        f.querySelector('[data-formsub]').textContent = 'تعديل بيانات الجهاز';
+      }
+    } else f.querySelector('[data-formsub]').textContent = kind === 'used' ? 'بيانات الجهاز والبائع وصور البطاقة' : 'جهاز بالضمان من المورد';
+    paintForm(kind); imeiHint(kind); f.hidden = false; f.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function closeForm(kind){ formEl(kind).hidden = true; st[kind] = blank(kind); }
+  function save(kind){
+    const s = st[kind]; const name = String(val(kind, 'name')).trim(); if (!name) { alert('اكتب اسم الجهاز.'); return; }
+    const imei = String(val(kind, 'imei')).trim(); const clash = imeiClash(imei, s.editing);
+    if (clash) { alert('السيريال ده موجود قبل كده في «' + clash + '». راجعه عشان ماتتسجلش نفس القطعة مرتين.'); return; }
+    const buy = num(val(kind, 'buyPrice')), sell = num(val(kind, 'sellPrice')); if (buy < 0 || sell < 0) { alert('الأسعار لازم تكون أرقام صحيحة.'); return; }
+    const qty = kind === 'new' ? Math.floor(num(val(kind, 'qty'))) : 1; if (kind === 'new' && (!Number.isInteger(qty) || qty < 1)) { alert('الكمية لازم تكون رقم صحيح أكبر من صفر.'); return; }
+    const list = items(kind); const old = s.editing ? list.find(x => x.id === s.editing) : null;
+    const it = Object.assign({}, old || {}, { id: old ? old.id : 'cat-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), kind, name, imei, storage: String(val(kind, 'storage')).trim(), color: String(val(kind, 'color')).trim(), warranty: String(val(kind, 'warranty')).trim(), buyPrice: buy, sellPrice: sell, photos: s.photos.slice(), notes: String(val(kind, 'notes')).trim(), status: old ? (old.status || 'available') : 'available', createdAt: old ? old.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() });
+    if (kind === 'used') Object.assign(it, { grade: s.grade, battery: String(val(kind, 'battery')).trim(), accessories: s.acc.slice(), defects: String(val(kind, 'defects')).trim(), sellerName: String(val(kind, 'sellerName')).trim(), sellerPhone: String(val(kind, 'sellerPhone')).trim(), nationalId: String(val(kind, 'nationalId')).trim(), buyDate: String(val(kind, 'buyDate')) || today() });
+    else Object.assign(it, { qty, state: s.state, supplierName: String(val(kind, 'supplierName')).trim(), supplierPhone: String(val(kind, 'supplierPhone')).trim(), invoiceNo: String(val(kind, 'invoiceNo')).trim(), invoicePhoto: s.invoice });
+    if (old) { Object.assign(old, it); syncListed(old); } else list.unshift(it);
+    if (!old && val(kind, 'autoList')) listInSale(it);
+    if (!saveItems(kind, list)) return;
+    if (kind === 'used' && (s.idFront || s.idBack)) { const m = idMap(); m['used:' + it.id] = { front: s.idFront, back: s.idBack, name: it.name, ts: Date.now() }; saveIdMap(m); }
+    closeForm(kind); refreshAll(); alert('تم حفظ الجهاز ' + (kind === 'used' ? 'المستعمل' : 'الجديد') + ' ✅');
+  }
+
+  /* ---------- ID viewer ---------- */
+  let viewing = '';
+  function openIdViewer(key, title){
+    viewing = key; const m = $('dv-id-modal'); const map = idMap(); const d = map[key] || {};
+    const slot = (side, label) => '<div class="dv-idv"><b>' + label + '</b>' + (d[side] ? '<img alt="' + label + '" src="' + d[side] + '">' : '<div class="dv-idnone">لا توجد صورة</div>') + '<div class="dv-idvbtns"><button type="button" class="dv-btn" data-dv-idchange="' + side + '">📷 ' + (d[side] ? 'تغيير' : 'إضافة') + '</button>' + (d[side] ? '<button type="button" class="dv-btn del" data-dv-iddel="' + side + '">🗑️</button>' : '') + '</div><input type="file" accept="image/*" hidden data-pick="idv-' + side + '"></div>';
+    m.firstElementChild.innerHTML = '<div class="dv-sheethead"><div><small>🪪 بطاقة الشخص</small><h3>' + esc(title || d.name || '') + '</h3></div><button type="button" class="dv-x" data-dv-idclose aria-label="إغلاق">✕</button></div><div class="dv-sheetbody">' + slot('front', 'وش البطاقة') + slot('back', 'ضهر البطاقة') + '</div>';
+    m.hidden = false; document.documentElement.classList.add('sa-lock');
+  }
+  function closeIdViewer(){ const m = $('dv-id-modal'); if (m) m.hidden = true; document.documentElement.classList.remove('sa-lock'); viewing = ''; }
+  function titleFor(key){
+    const [src, id] = [key.split(':')[0], key.slice(key.indexOf(':') + 1)];
+    try { if (src === 'used') return (items('used').find(x => x.id === id) || {}).name; if (src === 'device') return ((devices || []).find(x => x.id === id) || {}).phoneName; if (src === 'purchase') return ((phonePurchases || []).find(x => String(x.id) === id) || {}).phoneName; } catch (_) {}
+    return '';
+  }
+
+  /* ---------- events ---------- */
+  document.addEventListener('click', function (e) {
+    const t = e.target; if (!t || !t.closest) return;
+    const tab = t.closest('.device-sub-tab');
+    if (tab) setTimeout(function () { route(tab.id); }, 0);
+
+    const add = t.closest('[data-dv-add]'); if (add) { openForm(add.dataset.dvAdd); return; }
+    const cl = t.closest('[data-dv-close]'); if (cl) { closeForm(cl.dataset.dvClose); return; }
+    const sv = t.closest('[data-dv-save]'); if (sv) { save(sv.dataset.dvSave); return; }
+    const ed = t.closest('[data-dv-edit]'); if (ed) { const [k, id] = ed.dataset.dvEdit.split(':'); openForm(k, id); return; }
+    const del = t.closest('[data-dv-del]');
+    if (del) { const [k, id] = del.dataset.dvDel.split(':'); const list = items(k); const it = list.find(x => x.id === id); if (!it) return; if (!confirm('حذف الجهاز «' + it.name + '» نهائيًا؟')) return; unlist(it); saveItems(k, list.filter(x => x.id !== id)); const m = idMap(); delete m['used:' + id]; saveIdMap(m); refreshAll(); return; }
+    const ls = t.closest('[data-dv-list]'); if (ls) { const [k, id] = ls.dataset.dvList.split(':'); const list = items(k); const it = list.find(x => x.id === id); if (!it) return; if (it.imei && imeiClash(it.imei, id) === 'بيع التلفونات') { alert('الجهاز ده موجود بالفعل في بيع التلفونات.'); return; } listInSale(it); saveItems(k, list); refreshAll(); alert('اتضاف لقسم بيع التلفونات ✅'); return; }
+    const ul = t.closest('[data-dv-unlist]'); if (ul) { const [k, id] = ul.dataset.dvUnlist.split(':'); const list = items(k); const it = list.find(x => x.id === id); if (!it) return; unlist(it); saveItems(k, list); refreshAll(); return; }
+    const flt = t.closest('[data-flt]'); if (flt) { const kind = flt.closest('[data-dv-filters]').dataset.dvFilters; filt[kind].s = flt.dataset.flt; render(kind); return; }
+    const ch = t.closest('.dv-ch[data-grp]');
+    if (ch) { const kind = ch.closest('.dv-form').id.replace('dv-form-', ''); const g = ch.dataset.grp, v = ch.dataset.val, s = st[kind]; if (g === 'acc') s.acc = s.acc.includes(v) ? s.acc.filter(x => x !== v) : s.acc.concat(v); else s[g] = v; paintForm(kind); return; }
+    const stp = t.closest('[data-dv-step]'); if (stp) { const input = stp.parentElement.querySelector('input'); input.value = Math.max(1, Math.floor(num(input.value) || 1) + Number(stp.dataset.dvStep)); const kind = stp.closest('.dv-form').id.replace('dv-form-', ''); profit(kind); return; }
+    const pp = t.closest('[data-dv-pickphotos]'); if (pp) { pp.closest('.dv-form').querySelector('[data-pick="photos"]').click(); return; }
+    const pi = t.closest('[data-dv-pickinvoice]'); if (pi) { pi.closest('.dv-form').querySelector('[data-pick="invoice"]').click(); return; }
+    const rp = t.closest('[data-dv-rmphoto]'); if (rp) { const kind = rp.closest('.dv-form').id.replace('dv-form-', ''); st[kind].photos.splice(Number(rp.dataset.dvRmphoto), 1); paintForm(kind); return; }
+    const ri = t.closest('[data-dv-rminvoice]'); if (ri) { st.new.invoice = ''; paintForm('new'); return; }
+    const slot = t.closest('[data-idslot]'); if (slot) { const inp = slot.querySelector('input[type=file]'); if (inp && t !== inp) inp.click(); return; }
+    const io = t.closest('[data-dv-idopen]'); if (io) { openIdViewer(io.dataset.dvIdopen, titleFor(io.dataset.dvIdopen)); return; }
+    const ib = t.closest('.dv-id-btn'); if (ib) { openIdViewer(ib.dataset.dvIdkey, titleFor(ib.dataset.dvIdkey)); return; }
+    if (t.closest('[data-dv-idclose]') || t === $('dv-id-modal')) { closeIdViewer(); return; }
+    const ic = t.closest('[data-dv-idchange]'); if (ic) { ic.closest('.dv-idv').querySelector('input[type=file]').click(); return; }
+    const idl = t.closest('[data-dv-iddel]'); if (idl) { const m = idMap(); if (m[viewing]) { m[viewing][idl.dataset.dvIddel] = ''; saveIdMap(m); } openIdViewer(viewing, titleFor(viewing)); render('used'); decorate(); return; }
+  }, true);
+
+  document.addEventListener('change', async function (e) {
+    const t = e.target; if (!t || !t.matches) return;
+    if (t.matches('[data-dv-status]')) { const kind = ['used', 'new'].find(k => items(k).some(x => x.id === t.dataset.dvStatus)); if (kind) { const list = items(kind); const it = list.find(x => x.id === t.dataset.dvStatus); it.status = t.value; saveItems(kind, list); refreshAll(); } return; }
+    const pick = t.dataset && t.dataset.pick; if (!pick || !t.files || !t.files.length) return;
+    const form = t.closest('.dv-form'); const kind = form ? form.id.replace('dv-form-', '') : '';
+    if (pick === 'photos') { for (const f of [...t.files]) { if (st[kind].photos.length >= 5) break; const d = await readImage(f, 1000, 0.75); if (d) st[kind].photos.push(d); } paintForm(kind); }
+    else if (pick === 'invoice') { const d = await readImage(t.files[0], 1100, 0.78); if (d) { st.new.invoice = d; paintForm('new'); } }
+    else if (pick.startsWith('id-')) {
+      const side = pick.slice(3); const d = await readImage(t.files[0], 1100, 0.8); if (!d) return;
+      const slot = t.closest('[data-idslot]'); const pair = t.closest('.dv-idpair');
+      if (pair) { pend[pair.dataset.form][side] = d; setIdPreview(slot, d); }
+      else { st[kind][side === 'front' ? 'idFront' : 'idBack'] = d; paintForm(kind); }
+    } else if (pick.startsWith('idv-')) {
+      const side = pick.slice(4); const d = await readImage(t.files[0], 1100, 0.8); if (!d || !viewing) return;
+      const m = idMap(); m[viewing] = Object.assign({ front: '', back: '', name: titleFor(viewing), ts: Date.now() }, m[viewing] || {}); m[viewing][side] = d; if (saveIdMap(m)) { openIdViewer(viewing, titleFor(viewing)); render('used'); decorate(); }
+    }
+    t.value = '';
+  });
+  document.addEventListener('input', function (e) {
+    const t = e.target; if (!t || !t.closest) return;
+    const form = t.closest('.dv-form'); if (form) { const kind = form.id.replace('dv-form-', ''); if (t.dataset.k === 'imei') imeiHint(kind); if (['buyPrice', 'sellPrice', 'qty'].includes(t.dataset.k)) profit(kind); }
+    if (t.matches('[data-dv-search]')) { const kind = t.dataset.dvSearch; filt[kind].q = t.value; render(kind); }
+    if (t.id === 'purchase-serial') purchaseSerialHint();
+  });
+
+  function route(id){
+    const map = { 'device-used-tab': 'used', 'device-new-tab': 'new' }; const kind = map[id];
+    ['used', 'new'].forEach(k => { const sec = $(KIND[k].sec); if (sec) sec.style.display = k === kind ? 'block' : 'none'; });
+    if (kind) {
+      ['phone-sale-section', 'phone-purchases-section'].forEach(s => { const el = $(s); if (el) el.style.display = 'none'; });
+      document.querySelectorAll('.device-sub-tab').forEach(tb => tb.classList.toggle('active', tb.id === id));
+      refreshAll();
+    }
+  }
+
+  /* ---------- ID button on existing sale / purchase cards + capture after their save ---------- */
+  function decorate(){
+    const map = idMap();
+    document.querySelectorAll('#devices-list .card-edit-button[data-id]').forEach(btn => {
+      const art = btn.closest('article'); if (!art || art.querySelector('.dv-id-btn')) return; const key = 'device:' + btn.dataset.id;
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'dv-id-btn' + (map[key] ? ' has' : ''); b.dataset.dvIdkey = key; b.textContent = '🪪 البطاقة' + (map[key] ? ' ✓' : '');
+      (art.querySelector('.card-print-area') || art).appendChild(b);
+    });
+    document.querySelectorAll('#phone-purchases-list .purchase-edit-button[data-id]').forEach(btn => {
+      const art = btn.closest('article'); if (!art || art.querySelector('.dv-id-btn')) return; const key = 'purchase:' + btn.dataset.id;
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'dv-id-btn' + (map[key] ? ' has' : ''); b.dataset.dvIdkey = key; b.textContent = '🪪 البطاقة' + (map[key] ? ' ✓' : '');
+      btn.after(b);
+    });
+  }
+  function watchLists(){
+    ['devices-list', 'phone-purchases-list'].forEach(id => { const el = $(id); if (!el || el.dataset.dvWatch) return; el.dataset.dvWatch = '1'; new MutationObserver(decorate).observe(el, { childList: true }); });
+    decorate();
+  }
+  function attachAfterSave(form){
+    const p = pend[form]; if (!p.front && !p.back) return;
+    const before = form === 'device' ? new Set((devices || []).map(d => String(d.id))) : new Set((phonePurchases || []).map(x => String(x.id)));
+    const editing = form === 'device' ? (typeof editingDeviceId !== 'undefined' ? editingDeviceId : null) : (typeof editingPurchaseId !== 'undefined' ? editingPurchaseId : null);
+    setTimeout(function () {
+      const list = form === 'device' ? devices : phonePurchases; const fresh = (list || []).find(x => !before.has(String(x.id)));
+      const id = fresh ? String(fresh.id) : (editing ? String(editing) : ''); if (!id) return;
+      const key = (form === 'device' ? 'device:' : 'purchase:') + id; const m = idMap();
+      m[key] = Object.assign({ front: '', back: '', name: fresh ? (fresh.phoneName || '') : titleFor(key), ts: Date.now() }, m[key] || {});
+      if (p.front) m[key].front = p.front; if (p.back) m[key].back = p.back;
+      if (saveIdMap(m)) { resetPending(form); decorate(); }
+    }, 180);
+  }
+  document.addEventListener('click', function (e) {
+    const t = e.target; if (!t || !t.closest) return;
+    if (t.closest('#save-device-button')) attachAfterSave('device');
+    if (t.closest('#save-phone-purchase')) attachAfterSave('purchase');
+  }, true);
+
+  window.addEventListener('act-sales-data-updated', refreshAll);
+  window.addEventListener('act-devices-data-updated', function () { setTimeout(refreshAll, 0); });
+  window.addEventListener('act-user-data-ready', function () { setTimeout(function () { refreshAll(); decorate(); }, 0); });
+  function init(){ build(); watchLists(); refreshAll(); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(init, 400); }); else setTimeout(init, 400);
+})();

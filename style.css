@@ -22872,3 +22872,176 @@ html.sa-lock{overflow:hidden}
 #independent-sales-section .independent-sales-card:last-child:nth-child(odd){grid-column:auto}
 .sn [hidden],.sa-sheet [hidden]{display:none !important}
 .sn .sn-step input:not([type=checkbox]),.sa-sheet .sn-step input{border:0 !important;background:transparent !important;box-shadow:none !important;text-align:center;font-size:17px !important;font-weight:700;min-height:38px !important;padding:0 !important}
+
+/* =========================================================
+   ACT DEVICES - PREMIUM (dv-*)
+========================================================= */
+#devices-main-section .device-sub-tabs{display:grid !important;grid-template-columns:repeat(2,minmax(0,1fr)) !important;gap:10px !important;margin:0 0 12px !important}
+#devices-main-section .device-sub-tab{position:relative;display:grid !important;grid-template-columns:42px 1fr;grid-template-rows:auto auto;column-gap:10px;align-items:center;text-align:right;padding:11px !important;border-radius:18px !important;border:1px solid var(--sa-line) !important;background:var(--sa-card) !important;color:var(--sa-text) !important;transition:transform .2s,border-color .2s,box-shadow .2s;animation:saUp .4s both}
+#devices-main-section .device-sub-tab>span{grid-row:1/3;width:42px;height:42px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:21px;color:#fff;background:linear-gradient(135deg,#2563eb,#38bdf8)}
+#devices-main-section #device-purchase-tab>span{background:linear-gradient(135deg,#ea580c,#fbbf24)}
+#devices-main-section #device-used-tab>span{background:linear-gradient(135deg,#7c3aed,#c084fc)}
+#devices-main-section #device-new-tab>span{background:linear-gradient(135deg,#059669,#34d399)}
+#devices-main-section .device-sub-tab strong{font-size:13.5px;color:var(--sa-text) !important;align-self:end}
+#devices-main-section .device-sub-tab small{font-size:11px;color:var(--sa-sub) !important;align-self:start}
+#devices-main-section .device-sub-tab.active{border-color:var(--sa-accent) !important;box-shadow:0 0 0 2px rgba(74,168,255,.22);background:rgba(74,168,255,.1) !important}
+.dv-new{position:absolute;top:-7px;left:12px;font-style:normal;font-size:10px;font-weight:800;background:var(--sa-ok);color:#06281c;border-radius:99px;padding:1px 8px}
+#dv-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0 0 14px}
+.dv-tile{border-radius:16px;padding:10px 4px;text-align:center;color:#fff;animation:saPop .4s both;min-width:0}
+.dv-tile span{display:block;font-size:10.5px;opacity:.92}.dv-tile b{font-size:15px;word-break:break-word}
+.dv-tile.b1{background:linear-gradient(135deg,#1d4ed8,#38bdf8)}.dv-tile.b2{background:linear-gradient(135deg,#7c3aed,#c084fc)}.dv-tile.b3{background:linear-gradient(135deg,#047857,#34d399)}.dv-tile.b4{background:linear-gradient(135deg,#c2410c,#fbbf24)}
+.dv-sec{direction:rtl;color:var(--sa-text)}
+.dv-sec [hidden],#dv-id-modal [hidden]{display:none !important}
+.dv-search{display:flex;align-items:center;gap:8px;border:1px solid var(--sa-line);background:var(--sa-card);border-radius:16px;padding:0 12px;margin-bottom:10px}
+.dv-search input{flex:1;border:0 !important;background:transparent !important;color:var(--sa-text) !important;padding:12px 4px !important;outline:0;font-size:14px;min-width:0}
+.dv-chips{display:flex;gap:6px;flex-wrap:wrap}
+.dv-filters{margin-bottom:12px}
+.dv-ch{all:unset;cursor:pointer;padding:8px 12px;border-radius:999px;border:1px solid var(--sa-line);background:var(--sa-card2);font-size:12.5px;color:var(--sa-sub)}
+.dv-ch.on{background:rgba(74,168,255,.18);border-color:var(--sa-accent);color:var(--sa-accent);font-weight:700}
+.dv-ch em{font-style:normal;opacity:.8}
+.dv-addbig{all:unset;box-sizing:border-box;display:block;width:100%;cursor:pointer;text-align:center;padding:14px;border-radius:16px;color:#fff;font-weight:800;font-size:15px;margin-bottom:12px;box-shadow:0 8px 22px rgba(37,99,235,.35)}
+.dv-form{margin-bottom:14px;display:flex;flex-direction:column;gap:12px;animation:saUp .3s both}
+.dv-form[hidden]{display:none}
+.dv-formhead{display:flex;justify-content:space-between;align-items:center;border-radius:20px;padding:14px;color:#fff;position:relative;overflow:hidden}
+.dv-formhead small{font-size:11px;letter-spacing:.12em;opacity:.85}.dv-formhead h3{margin:2px 0;font-size:20px;color:#fff}.dv-formhead p{margin:0;font-size:12px;opacity:.9}
+.dv-x{all:unset;cursor:pointer;width:34px;height:34px;border-radius:12px;background:rgba(255,255,255,.2);color:#fff;display:flex;align-items:center;justify-content:center}
+.dv-card{background:var(--sa-card);border:1px solid var(--sa-line);border-radius:20px;padding:14px}
+.dv-ch-h{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.dv-ch-h strong{display:block;font-size:15px;color:var(--sa-text)}.dv-ch-h small{color:var(--sa-sub);font-size:11.5px}
+.dv-ci{width:38px;height:38px;flex:0 0 38px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:19px;color:#fff}
+.dv-f{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;min-width:0}
+.dv-f>label{font-size:11.5px;color:var(--sa-sub)}
+.dv-r2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dv-f input:not([type=checkbox]):not([type=file]),.dv-f textarea,.dv-step input{width:100%;box-sizing:border-box;border:1px solid var(--sa-line) !important;background:var(--sa-card2) !important;color:var(--sa-text) !important;border-radius:13px !important;padding:11px 12px !important;font-size:14px !important;min-height:44px;outline:0}
+.dv-f input:focus,.dv-f textarea:focus{border-color:var(--sa-accent) !important;box-shadow:0 0 0 3px rgba(74,168,255,.18)}
+.dv-imei{font-size:11.5px;font-weight:700}.dv-imei.ok{color:var(--sa-ok)}.dv-imei.bad{color:var(--sa-bad)}
+.dv-step{display:flex;align-items:center;gap:4px;background:var(--sa-card2);border:1px solid var(--sa-line);border-radius:13px;padding:3px}
+.dv-step button{all:unset;cursor:pointer;flex:0 0 38px;height:38px;border-radius:10px;background:rgba(127,150,190,.18);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--sa-text)}
+.dv-step input{border:0 !important;background:transparent !important;text-align:center;font-size:17px !important;font-weight:700;min-height:38px !important;padding:0 !important;box-shadow:none !important}
+.dv-idrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dv-idbox{border:1.5px dashed var(--sa-accent);border-radius:16px;padding:10px;text-align:center;background:rgba(74,168,255,.06);cursor:pointer}
+.dv-idbox.has{border-style:solid;background:rgba(52,211,153,.08);border-color:var(--sa-ok)}
+.dv-idprev{height:84px;display:flex;align-items:center;justify-content:center;font-size:32px;margin-bottom:6px;border-radius:10px;overflow:hidden}
+.dv-idprev img{width:100%;height:100%;object-fit:cover;border-radius:10px}
+.dv-idbox b{display:block;font-size:12.5px;color:var(--sa-text)}.dv-idbox small{font-size:11px;color:var(--sa-sub)}
+.dv-lock{margin-top:10px;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);color:var(--sa-warn);border-radius:12px;padding:8px 10px;font-size:11.5px}
+.dv-idpair{margin-top:10px}
+.dv-photos{display:flex;gap:8px;flex-wrap:wrap}
+.dv-pho{position:relative;width:66px;height:66px;border-radius:12px;overflow:hidden;background:var(--sa-card2)}
+.dv-pho img{width:100%;height:100%;object-fit:cover}
+.dv-pho button:not(.add){all:unset;cursor:pointer;position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;text-align:center;line-height:20px;font-size:14px}
+.dv-pho.add{all:unset;box-sizing:border-box;cursor:pointer;width:66px;height:66px;border-radius:12px;border:1.5px dashed var(--sa-accent);color:var(--sa-accent);font-size:24px;display:flex;align-items:center;justify-content:center}
+.dv-profit{display:flex;justify-content:space-between;align-items:center;background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.35);border-radius:14px;padding:10px 12px;margin-bottom:10px}
+.dv-profit b{color:var(--sa-ok);font-size:18px}.dv-profit.neg{background:rgba(255,107,122,.12);border-color:rgba(255,107,122,.35)}.dv-profit.neg b{color:var(--sa-bad)}
+.dv-toggle{display:flex;align-items:center;gap:10px;background:var(--sa-card);border:1px solid var(--sa-line);border-radius:14px;padding:11px 12px;font-size:12.5px;cursor:pointer;color:var(--sa-text)}
+.dv-toggle input{position:absolute;opacity:0;width:0;height:0}
+.dv-sw{flex:0 0 32px;width:32px;height:19px;border-radius:99px;background:rgba(127,150,190,.4);position:relative;transition:background .2s}
+.dv-sw:after{content:"";position:absolute;width:15px;height:15px;border-radius:50%;background:#fff;top:2px;left:2px;transition:left .2s}
+.dv-toggle input:checked + .dv-sw{background:#2563eb}.dv-toggle input:checked + .dv-sw:after{left:15px}
+.dv-acts{display:flex;gap:8px}
+.dv-btn{all:unset;box-sizing:border-box;flex:1;cursor:pointer;text-align:center;padding:14px;border-radius:15px;border:1px solid var(--sa-line);background:var(--sa-card2);font-weight:700;font-size:14px;color:var(--sa-text)}
+.dv-btn.dv-main{flex:2;color:#fff;border-color:transparent;box-shadow:0 8px 22px rgba(37,99,235,.35)}
+.dv-btn.del{flex:0 0 auto;padding:14px 16px;color:var(--sa-bad)}
+.dv-list{display:flex;flex-direction:column;gap:10px}
+.dv-empty{padding:26px;text-align:center;color:var(--sa-sub);border:1px dashed var(--sa-line);border-radius:18px}
+.dv-dev{display:flex;gap:10px;background:var(--sa-card);border:1px solid var(--sa-line);border-radius:18px;padding:10px;animation:saUp .35s both}
+.dv-ph{flex:0 0 74px;height:74px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:34px;overflow:hidden}
+.dv-ph img{width:100%;height:100%;object-fit:cover}
+.dv-dm{flex:1;min-width:0}
+.dv-dtop{display:flex;justify-content:space-between;align-items:flex-start;gap:6px}
+.dv-dtop b{font-size:14px;color:var(--sa-text)}
+.dv-dm small{color:var(--sa-sub);font-size:11.5px;display:block}
+.dv-stat{all:unset;cursor:pointer;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:99px;flex:0 0 auto}
+.t-ok{background:rgba(52,211,153,.16);color:var(--sa-ok)}.t-warn{background:rgba(251,191,36,.18);color:var(--sa-warn)}.t-bad{background:rgba(255,107,122,.16);color:var(--sa-bad)}.t-blue{background:rgba(74,168,255,.16);color:var(--sa-accent)}.t-gray{background:rgba(148,163,184,.2);color:var(--sa-sub)}
+.dv-tags{display:flex;gap:5px;flex-wrap:wrap;margin:5px 0}
+.dv-tag{font-size:10.5px;padding:2px 8px;border-radius:99px;font-weight:700}
+.dv-prices{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--sa-sub);margin-top:3px}
+.dv-prices b{color:var(--sa-text);font-size:14px}.dv-prices em{font-style:normal;color:var(--sa-ok);font-weight:700}.dv-prices em.neg{color:var(--sa-bad)}
+.dv-dact{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.dv-dact button,.dv-id-btn{all:unset;cursor:pointer;flex:1;min-width:64px;text-align:center;font-size:11.5px;padding:8px 4px;border-radius:10px;background:var(--sa-card2);border:1px solid var(--sa-line);color:var(--sa-text);box-sizing:border-box}
+.dv-dact button.on,.dv-dact button.has,.dv-id-btn.has{border-color:var(--sa-ok);color:var(--sa-ok)}
+.dv-dact button.del{flex:0 0 38px;min-width:38px;color:var(--sa-bad)}
+.dv-id-btn{display:inline-block;margin:8px 4px 0;padding:8px 12px}
+.dv-modal{position:fixed;inset:0;z-index:20001;background:rgba(3,9,20,.7);backdrop-filter:blur(4px);display:flex;align-items:flex-end;justify-content:center}
+.dv-sheet{width:100%;max-width:560px;max-height:92vh;overflow:auto;background:var(--sa-sheet);color:var(--sa-text);border:1px solid var(--sa-line);border-radius:26px 26px 0 0;direction:rtl;animation:saUp .3s both}
+@media (min-width:700px){.dv-modal{align-items:center}.dv-sheet{border-radius:26px}}
+.dv-sheethead{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;background:linear-gradient(135deg,#0f2a5e,#2563eb);color:#fff;position:sticky;top:0}
+.dv-sheethead small{font-size:11px;opacity:.85}.dv-sheethead h3{margin:2px 0 0;font-size:19px;color:#fff}
+.dv-sheetbody{padding:16px 18px 24px;display:flex;flex-direction:column;gap:14px}
+.dv-idv b{display:block;margin-bottom:6px;font-size:13px}
+.dv-idv img{width:100%;border-radius:14px;border:1px solid var(--sa-line);display:block}
+.dv-idnone{height:120px;border:1.5px dashed var(--sa-line);border-radius:14px;display:flex;align-items:center;justify-content:center;color:var(--sa-sub);font-size:13px}
+.dv-idvbtns{display:flex;gap:8px;margin-top:8px}
+.dv-modal[hidden]{display:none !important}
+#devices-main-section>.section-heading{display:flex !important;flex-direction:column !important;gap:12px !important;align-items:stretch !important}
+#devices-main-section>.section-heading>.heading-icon{display:none !important}
+#devices-main-section>.section-heading>div:not(.heading-icon):not(.device-sub-tabs):not(#dv-stats){order:1}
+#devices-main-section>.section-heading>#dv-stats{order:2;margin:0}
+#devices-main-section>.section-heading>.device-sub-tabs{order:3}
+.dv-new{top:6px !important}
+
+/* =========================================================
+   ACT DEVICES - sale & purchase tabs (same premium look)
+========================================================= */
+#phone-sale-section,#phone-purchases-section{direction:rtl;color:var(--sa-text)}
+#phone-sale-section .sales-controls,#phone-purchases-section .sales-controls{display:flex !important;flex-direction:column !important;gap:10px !important;background:transparent !important;border:0 !important;box-shadow:none !important;padding:0 !important;margin:0 0 12px !important}
+#phone-sale-section .sales-controls .add-button,#phone-purchases-section .sales-controls .add-button{all:unset;box-sizing:border-box;display:flex !important;align-items:center;justify-content:center;gap:10px;width:100%;cursor:pointer;padding:14px;border-radius:16px;color:#fff;font-weight:800;font-size:15px;background:linear-gradient(135deg,#2563eb,#38bdf8) !important;box-shadow:0 8px 22px rgba(37,99,235,.35)}
+#phone-purchases-section .sales-controls .add-button{background:linear-gradient(135deg,#ea580c,#fbbf24) !important;box-shadow:0 8px 22px rgba(234,88,12,.35)}
+#phone-sale-section .add-button small,#phone-purchases-section .add-button small{display:none}
+#phone-sale-section .add-button .button-icon,#phone-purchases-section .add-button .button-icon{font-size:20px}
+#phone-sale-section .search-wrapper,#phone-purchases-section .search-wrapper{display:flex !important;align-items:center;gap:8px;border:1px solid var(--sa-line) !important;background:var(--sa-card) !important;border-radius:16px !important;padding:0 12px !important;width:100% !important;box-sizing:border-box}
+#phone-sale-section .search-wrapper input,#phone-purchases-section .search-wrapper input{flex:1;border:0 !important;background:transparent !important;color:var(--sa-text) !important;padding:12px 4px !important;outline:0;font-size:14px;min-width:0;box-shadow:none !important}
+#device-form,#phone-purchase-form{background:transparent !important;border:0 !important;box-shadow:none !important;padding:0 !important;margin:0 0 14px !important;position:relative;flex-direction:column;gap:12px}
+#device-form::before,#device-form::after,#phone-purchase-form::before,#phone-purchase-form::after{display:none !important}
+#device-form[style*="block"],#phone-purchase-form[style*="block"]{display:flex !important}
+#device-form .form-heading,#phone-purchase-form .form-heading{display:flex !important;align-items:center;gap:12px;border-radius:20px;padding:14px 16px;color:#fff;background:linear-gradient(135deg,#0f2a5e,#2563eb 60%,#38bdf8) !important;border:0 !important;margin:0 !important;position:relative;overflow:hidden;animation:saUp .3s both}
+#phone-purchase-form .form-heading{background:linear-gradient(135deg,#7c2d12,#ea580c 60%,#fbbf24) !important}
+#device-form .form-heading *,#phone-purchase-form .form-heading *{color:#fff !important}
+#device-form .form-heading span,#phone-purchase-form .form-heading span{font-size:11px;letter-spacing:.12em;opacity:.85}
+#device-form .form-heading h2,#phone-purchase-form .form-heading h2{margin:2px 0 0;font-size:20px}
+#device-form .form-heading-icon,#phone-purchase-form .form-heading-icon{width:44px;height:44px;border-radius:14px;background:rgba(255,255,255,.18) !important;display:flex;align-items:center;justify-content:center;font-size:22px}
+#close-device-form-button,#close-phone-purchase-form{all:unset;cursor:pointer;position:absolute;top:12px;left:12px;z-index:3;width:34px;height:34px;border-radius:12px;background:rgba(255,255,255,.22);color:#fff;display:flex;align-items:center;justify-content:center}
+#device-form .dv-card,#phone-purchase-form .dv-card{animation:saUp .35s both}
+.dv-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dv-grid .form-group{display:flex;flex-direction:column;gap:5px;margin:0 !important;min-width:0;background:transparent !important;border:0 !important;padding:0 !important}
+.dv-grid .form-group.full,.dv-grid .form-group:has(textarea),.dv-grid .form-group:has(input[type=file]),.dv-grid .form-group:has(#purchase-serial),.dv-grid .form-group:has(#phone-name),.dv-grid .form-group:has(#purchase-phone-name),.dv-grid .form-group:has(#customer-name),.dv-grid .form-group:has(#purchase-seller-name){grid-column:1/-1}
+.dv-grid .form-group>label{font-size:11.5px !important;color:var(--sa-sub) !important;margin:0 !important}
+.dv-grid .form-group input:not([type=file]):not([type=checkbox]),.dv-grid .form-group select,.dv-grid .form-group textarea{width:100%;box-sizing:border-box;border:1px solid var(--sa-line) !important;background:var(--sa-card2) !important;color:var(--sa-text) !important;border-radius:13px !important;padding:11px 12px !important;font-size:14px !important;min-height:44px;outline:0;box-shadow:none !important}
+.dv-grid .form-group textarea{min-height:84px}
+.dv-grid .form-group input:focus,.dv-grid .form-group textarea:focus,.dv-grid .form-group select:focus{border-color:var(--sa-accent) !important;box-shadow:0 0 0 3px rgba(74,168,255,.18) !important}
+.dv-grid .form-group input[type=file]{width:100%;box-sizing:border-box;padding:10px;border:1.5px dashed var(--sa-accent);border-radius:13px;background:rgba(74,168,255,.06);color:var(--sa-sub);font-size:12.5px}
+.dv-grid .form-group small{color:var(--sa-sub);font-size:11px}
+#device-form .form-actions,#phone-purchase-form .form-actions{display:flex;margin:0 !important;padding:0 !important}
+#device-form .save-button,#phone-purchase-form .save-button{all:unset;box-sizing:border-box;width:100%;cursor:pointer;text-align:center;padding:15px;border-radius:15px;font-weight:800;font-size:15px;color:#fff;background:linear-gradient(135deg,#2563eb,#38bdf8);box-shadow:0 8px 22px rgba(37,99,235,.35)}
+#phone-purchase-form .save-button{background:linear-gradient(135deg,#ea580c,#fbbf24);box-shadow:0 8px 22px rgba(234,88,12,.35)}
+/* cards */
+#devices-list,#phone-purchases-list{display:flex !important;flex-direction:column !important;gap:12px !important;grid-template-columns:none !important}
+#devices-list>article,#phone-purchases-list>article{position:relative;background:var(--sa-card) !important;border:1px solid var(--sa-line) !important;border-radius:20px !important;padding:14px !important;box-shadow:none !important;color:var(--sa-text) !important;animation:saUp .35s both;text-align:right;overflow:hidden}
+#devices-list>article:before,#phone-purchases-list>article:before{content:"";position:absolute;top:0;right:0;left:0;height:4px;background:linear-gradient(90deg,#2563eb,#38bdf8)}
+#phone-purchases-list>article:before{background:linear-gradient(90deg,#ea580c,#fbbf24)}
+#devices-list .device-card-top,#phone-purchases-list .device-card-top{display:flex !important;flex-wrap:wrap;align-items:center !important;gap:8px !important;margin-bottom:8px}
+#devices-list .device-number,#phone-purchases-list .device-number{background:rgba(74,168,255,.16) !important;color:var(--sa-accent) !important;border-radius:99px !important;padding:3px 10px !important;font-size:12px;font-weight:800}
+#devices-list .device-actions,#phone-purchases-list .device-actions{display:flex !important;gap:6px !important;flex-wrap:wrap;margin-inline-start:auto}
+#devices-list .device-actions button,#phone-purchases-list .device-actions button,#devices-list .card-print-button,#phone-purchases-list .purchase-print-button{all:unset;cursor:pointer;box-sizing:border-box;padding:7px 11px;border-radius:10px;background:var(--sa-card2);border:1px solid var(--sa-line);color:var(--sa-text);font-size:12px;font-weight:600}
+#devices-list .card-delete-button,#phone-purchases-list .purchase-delete-button{color:var(--sa-bad) !important}
+#phone-purchases-list .purchase-transfer-button{border-color:var(--sa-ok) !important;color:var(--sa-ok) !important}
+#devices-list .device-card-icon,#phone-purchases-list .device-card-icon{width:56px;height:56px;border-radius:16px;margin:6px 0 8px !important;display:flex;align-items:center;justify-content:center;font-size:28px !important;background:linear-gradient(135deg,#1e3a8a,#38bdf8)}
+#phone-purchases-list .device-card-icon{background:linear-gradient(135deg,#7c2d12,#fb923c)}
+#devices-list .purchase-device-photo,#phone-purchases-list .purchase-device-photo{width:100% !important;max-width:none !important;max-height:190px !important;object-fit:cover !important;border-radius:14px !important;margin:0 0 10px !important}
+#devices-list h3,#phone-purchases-list h3{margin:4px 0 8px !important;font-size:17px !important;color:var(--sa-text) !important}
+#devices-list .device-info,#phone-purchases-list .device-info{display:flex !important;justify-content:space-between;gap:10px;padding:7px 0 !important;border-bottom:1px solid var(--sa-line) !important;font-size:13px !important;color:var(--sa-sub) !important;background:transparent !important}
+#devices-list .device-info strong{color:var(--sa-sub);font-weight:600}
+#devices-list .device-info span,#phone-purchases-list .device-info span{color:var(--sa-text)}
+#devices-list .device-notes,#phone-purchases-list .device-notes{margin-top:8px;background:rgba(251,191,36,.1) !important;border:1px solid rgba(251,191,36,.28);color:var(--sa-warn) !important;border-radius:12px;padding:8px 10px;font-size:12.5px}
+#phone-purchases-list .purchase-completion-status{font-size:11px !important;font-weight:700;padding:3px 9px;border-radius:99px}
+#phone-purchases-list .purchase-completion-status.is-complete{background:rgba(52,211,153,.16);color:var(--sa-ok)}
+#phone-purchases-list .purchase-completion-status.is-incomplete{background:rgba(251,191,36,.18);color:var(--sa-warn)}
+#devices-list .card-print-area{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
+.dv-id-btn{all:unset;cursor:pointer;box-sizing:border-box;padding:7px 11px;border-radius:10px;background:var(--sa-card2);border:1px solid var(--sa-line);color:var(--sa-text);font-size:12px;font-weight:600}
+#phone-sale-section .sales-controls .add-button,#phone-purchases-section .sales-controls .add-button{width:100% !important;max-width:none !important;height:auto !important;min-height:0 !important;flex:0 0 auto !important;align-self:stretch !important;margin:0 !important}
+#phone-sale-section .sales-controls .search-wrapper,#phone-purchases-section .sales-controls .search-wrapper{max-width:none !important;align-self:stretch !important;margin:0 !important}
+.dv-grid .form-group:has(#price),.dv-grid .form-group:has(#purchase-seller-phone),.dv-grid .form-group:has(#purchase-box-included){grid-column:1/-1}
+#devices-list .device-actions,#phone-purchases-list .device-actions{flex:1 1 100% !important;order:3;margin:6px 0 0 !important;justify-content:flex-start}
+#devices-list .device-actions button,#phone-purchases-list .device-actions button{flex:1 1 auto;text-align:center}
+#devices-list .device-actions,#phone-purchases-list .device-actions{flex-direction:row !important;width:100% !important;align-items:stretch !important}
+#devices-list .device-card-top,#phone-purchases-list .device-card-top{flex-direction:row !important;justify-content:flex-start !important}
