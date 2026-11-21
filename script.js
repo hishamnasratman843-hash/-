@@ -20660,6 +20660,13 @@ function savePurchases() {
         }
     });
 
+    window.actIndependentPurchases = {
+        get: function () { return purchases.slice(); },
+        set: function (rows) { const previous = purchases; purchases = Array.isArray(rows) ? rows : []; if (!savePurchases()) { purchases = previous; return false; } return true; },
+        reload: loadPurchases,
+        makeId: makeId
+    };
+
     // يسمح لزر الشريط السفلي بتحديث السجل بعد تغيير المستخدم
     window.renderIndependentPurchases = function () {
         loadPurchases();
@@ -21470,8 +21477,16 @@ if (
         const inventoryValue = saleDevices.reduce((total, item) =>
             total + numeric(item.price || item.salePrice || item.sellingPrice || 0), 0
         );
-        setText("act-kpi-inventory-value", money(inventoryValue));
-        setText("act-kpi-inventory-count", saleDevices.length.toLocaleString("ar-EG") + " جهاز مسجل للبيع");
+        let purchaseUnits = 0, purchaseValue = 0;
+        try {
+            getPhonePurchaseCards().forEach(card => {
+                const units = Math.max(1, Number(card.quantity) || 1);
+                purchaseUnits += units; purchaseValue += (Number(card.price) || 0) * units;
+            });
+        } catch (error) { console.warn("phone purchases KPI", error); }
+        const catalogStock = window.actCatalogUnits ? window.actCatalogUnits() : { units: 0, value: 0 };
+        setText("act-kpi-inventory-value", money(inventoryValue + purchaseValue + catalogStock.value));
+        setText("act-kpi-inventory-count", (saleDevices.length + purchaseUnits + catalogStock.units).toLocaleString("ar-EG") + " جهاز مسجل");
 
         setText("act-kpi-period-label", "آخر " + period + " أيام");
 
@@ -24382,7 +24397,7 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
       '<table><thead><tr><th>الفاتورة</th><th>التاريخ</th><th>الأصناف</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th></tr></thead><tbody>' + inv + '</tbody></table>' +
       '<table class="tot"><tr><td>إجمالي الفواتير</td><td><b>' + fmt(total) + '</b></td></tr><tr><td>إجمالي المدفوع</td><td class="ok">' + fmt(paid) + '</td></tr><tr><td>إجمالي المتبقي</td><td class="due">' + fmt(due) + '</td></tr></table>';
   }
-  window.actSalesPrint = { invoice: function (s) { printHtml('فاتورة ' + s.invoiceNumber, invoiceBody(s)); }, statement: function (key) { const b = statementBody(key); if (b) printHtml('كشف حساب', b); } };
+  window.actSalesPrint = { printHtml: printHtml, invoice: function (s) { printHtml('فاتورة ' + s.invoiceNumber, invoiceBody(s)); }, statement: function (key) { const b = statementBody(key); if (b) printHtml('كشف حساب', b); } };
   document.addEventListener('click', function (e) {
     const t = e.target; if (!t || !t.closest) return;
     const pr = t.closest('[data-sa-print]');
@@ -24961,14 +24976,15 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
   function stats(){
     const box = $('dv-stats'); if (!box) return;
     let saleCount = 0, saleValue = 0, purchases = 0;
-    try { (Array.isArray(devices) ? devices : []).forEach(d => { if (d.section === 'sale' || d.category === SECTIONS.SALE || d.status === 'البيع') { saleCount++; saleValue += num(d.price) || num(d.phonePrice); } }); purchases = (Array.isArray(phonePurchases) ? phonePurchases : []).length; } catch (_) {}
+    try { (Array.isArray(devices) ? devices : []).forEach(d => { if (d.section === 'sale' || d.category === SECTIONS.SALE || d.status === 'البيع') { saleCount++; saleValue += num(d.price) || num(d.phonePrice); } }); purchases = getPhonePurchaseCards().reduce((t, c) => t + Math.max(1, Number(c.quantity) || 1), 0); } catch (_) {}
     const used = items('used').filter(x => (x.status || 'available') !== 'sold'); const nw = items('new');
     const newLeft = nw.reduce((t, x) => t + remaining(x), 0);
     const unlistedValue = used.filter(x => !(x.listedIds || []).length).reduce((t, x) => t + num(x.sellPrice), 0) + nw.filter(x => !(x.listedIds || []).length).reduce((t, x) => t + num(x.sellPrice) * remaining(x), 0);
     box.innerHTML = '<div class="dv-tile b1"><span>معروض للبيع</span><b>' + saleCount + '</b></div><div class="dv-tile b2"><span>مستعمل</span><b>' + used.length + '</b></div><div class="dv-tile b3"><span>جديد</span><b>' + newLeft + '</b></div><div class="dv-tile b4"><span>قيمة المخزون</span><b>' + fmt(saleValue + unlistedValue) + '</b></div>';
     const set = (id, t) => { const b = $(id); const sm = b && b.querySelector('small'); if (sm) sm.textContent = t; };
-    set('device-sale-tab', saleCount + ' جهاز'); set('device-purchase-tab', purchases + ' عملية'); set('device-used-tab', used.length + ' جهاز'); set('device-new-tab', newLeft + ' جهاز');
+    set('device-sale-tab', saleCount + ' جهاز'); set('device-purchase-tab', purchases + ' جهاز'); set('device-used-tab', used.length + ' جهاز'); set('device-new-tab', newLeft + ' جهاز');
   }
+  window.actCatalogUnits = function () { let units = 0, value = 0; ['used', 'new'].forEach(k => items(k).forEach(it => { if ((it.status || 'available') === 'sold' || (it.listedIds || []).length) return; const n = remaining(it); units += n; value += num(it.sellPrice) * n; })); return { units, value }; };
   function refreshAll(){ if (!$('device-used-tab')) return; reconcile(); render('used'); render('new'); stats(); }
 
   /* ---------- form helpers ---------- */
@@ -25411,8 +25427,422 @@ document.getElementById("manual-day-close-button")?.addEventListener("click", fu
     const ref = window.actImgDB ? await window.actImgDB.put(d) : d; if (S.photo) (S.trash = S.trash || []).push(S.photo); S.photo = ref;
     render(); Object.keys(keep).forEach(k => { const el = root.querySelector('[data-acc-k="' + k + '"]'); if (el) el.value = keep[k]; }); profit();
   });
+  window.actAccessoryCats = { CATS: CATS, guess: guess };
   window.addEventListener('act-accessories-data-updated', function () { if (root && !S.form) render(); });
   window.addEventListener('act-user-data-ready', function () { if (!root) build(); else { migrate(); if (!S.form) render(); } });
   function init(){ if (!build()) setTimeout(function () { build(); }, 800); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(init, 500); }); else setTimeout(init, 500);
+})();
+
+/* =========================================================
+   ACT PURCHASES UX
+   Premium purchases section: operations, supplier accounts, payments, invoice photo,
+   and automatic routing of every purchased item to its own section:
+   - phones -> Devices > مشتريات التلفونات
+   - accessories / spare parts -> Accessories, inside the matching category (batteries, screens...)
+========================================================= */
+(function actPurchasesUX(){
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const fmt = v => (Math.round(num(v) * 100) / 100).toLocaleString('en-US');
+  const norm = v => String(v == null ? '' : v).trim().toLocaleLowerCase('ar').replace(/[أإآ]/g, 'ا').replace(/\s+/g, ' ');
+  const API = () => window.actIndependentPurchases;
+  const ACC = () => window.actAccessoryStore;
+  const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  const addDays = n => { const d = new Date(Date.now() + n * 86400000); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  const fmtDT = d => { try { const x = new Date(d); return isNaN(x) ? '' : x.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch (_) { return ''; } };
+  const CATS = {
+    phones: { label: 'أجهزة', icon: '📱', grad: 'linear-gradient(135deg,#2563eb,#38bdf8)' },
+    accessories: { label: 'إكسسوارات', icon: '🎧', grad: 'linear-gradient(135deg,#059669,#34d399)' },
+    parts: { label: 'قطع غيار', icon: '🔧', grad: 'linear-gradient(135deg,#7c3aed,#c084fc)' }
+  };
+  const accCats = () => (window.actAccessoryCats && window.actAccessoryCats.CATS) || [];
+  const accLabel = id => { const c = accCats().find(x => x.id === id); return c ? c.icon + ' ' + c.label : ''; };
+
+  /* ---------- data ---------- */
+  function ops(){
+    if (!API()) return [];
+    const map = new Map();
+    API().get().forEach(r => { const k = r.invoiceId || r.id; if (!map.has(k)) map.set(k, { id: k, lines: [] }); map.get(k).lines.push(r); });
+    const arr = [...map.values()];
+    arr.forEach(o => {
+      o.lines.sort((a, b) => (a.invoiceLine || 1) - (b.invoiceLine || 1));
+      const f = o.first = o.lines[0];
+      o.supplier = String(f.supplier || '').trim(); o.supplierPhone = String(f.supplierPhone || '').trim();
+      o.date = f.date || ''; o.notes = f.notes || ''; o.dueDate = f.dueDate || ''; o.invoiceNo = f.invoiceNo || '';
+      o.total = o.lines.reduce((t, l) => t + num(l.total), 0); o.paid = o.lines.reduce((t, l) => t + num(l.paid), 0);
+      o.due = Math.max(0, Math.round((o.total - o.paid) * 100) / 100); o.qty = o.lines.reduce((t, l) => t + num(l.quantity), 0);
+      o.payments = f.payments || []; o.history = f.history || []; o.cats = new Set(o.lines.map(l => l.category));
+    });
+    arr.forEach((o, i) => { o.no = arr.length - i; });
+    return arr;
+  }
+  const supKey = o => o.supplier ? 's:' + norm(o.supplier) : 's:none';
+  function suppliers(list){
+    const map = new Map();
+    list.forEach(o => { const k = supKey(o); if (!map.has(k)) map.set(k, { key: k, name: '', phone: '', ops: [] }); const g = map.get(k); if (!g.name && o.supplier) g.name = o.supplier; if (!g.phone && o.supplierPhone) g.phone = o.supplierPhone; g.ops.push(o); });
+    const out = [...map.values()]; out.forEach(g => { g.name = g.name || 'بدون مورد'; g.total = g.ops.reduce((t, o) => t + o.total, 0); g.paid = g.ops.reduce((t, o) => t + o.paid, 0); g.due = g.ops.reduce((t, o) => t + o.due, 0); });
+    out.sort((a, b) => (b.due - a.due) || (b.total - a.total)); return out;
+  }
+  const status = o => o.due <= 0.009 ? { t: 'مدفوعة', c: 'ok' } : (o.dueDate && o.dueDate < todayStr() ? { t: 'متأخرة', c: 'bad' } : { t: o.paid > 0 ? 'آجل جزئي' : 'آجل', c: 'warn' });
+
+  /* ---------- state ---------- */
+  const S = { tab: 'home', cat: 'all', q: '', st: 'all', supQ: '', supKey: '', modal: '', mEdit: false, mPanel: '', mErr: '', rows: [], photo: '', formErr: '', paidChip: '' };
+  let root = null;
+  const blankRow = () => ({ cat: 'phones', name: '', qty: 1, price: '', sell: '', sub: '' });
+  function resetForm(){ S.rows = [blankRow()]; S.photo = ''; S.formErr = ''; }
+  resetForm();
+
+  /* ---------- rendering: home ---------- */
+  function opCard(o){
+    const st = status(o); const items = o.lines.map(l => esc(l.product) + ' × ' + num(l.quantity)).join(' · ');
+    return '<article class="pu-card"><div class="pu-top"><span class="pu-no">#' + o.no + '</span><span class="sa-pill sa-pill-' + st.c + '">' + st.t + '</span>' + [...o.cats].map(c => '<span class="pu-cat">' + (CATS[c] ? CATS[c].icon : '') + '</span>').join('') + '</div>' +
+      '<button type="button" class="pu-open" data-pu-open="' + esc(o.id) + '"><div class="pu-sup">🏢 ' + esc(o.supplier || 'بدون مورد') + '</div><div class="pu-meta">' + esc(o.date) + (o.invoiceNo ? ' · فاتورة ' + esc(o.invoiceNo) : '') + '</div><div class="pu-items">' + items + '</div></button>' +
+      '<div class="pu-tot"><div><small>الإجمالي</small><b>' + fmt(o.total) + ' ج</b></div><div class="ok"><small>المدفوع</small><b>' + fmt(o.paid) + '</b></div><div class="' + (o.due > 0 ? 'bad' : 'ok') + '"><small>المتبقي</small><b>' + fmt(o.due) + '</b></div></div>' +
+      '<div class="pu-act"><button type="button" data-pu-open="' + esc(o.id) + '">📂 فتح</button><button type="button" data-pu-act="pay:' + esc(o.id) + '"' + (o.due <= 0 ? ' disabled' : '') + '>💵 دفعة</button><button type="button" data-pu-act="print:' + esc(o.id) + '">🖨️ طباعة</button><button type="button" class="del" data-pu-act="del:' + esc(o.id) + '" aria-label="حذف">🗑️</button></div></article>';
+  }
+  function filtered(list){
+    const q = norm(S.q); const today = todayStr(); const month = today.slice(0, 7);
+    return list.filter(o => {
+      if (S.cat !== 'all' && !o.cats.has(S.cat)) return false;
+      if (q && !(norm(o.supplier).includes(q) || norm(o.invoiceNo).includes(q) || o.lines.some(l => norm(l.product).includes(q)))) return false;
+      if (S.st === 'paid') return o.due <= 0.009; if (S.st === 'due') return o.due > 0.009;
+      if (S.st === 'today') return o.date === today; if (S.st === 'month') return String(o.date).startsWith(month);
+      return true;
+    });
+  }
+  function renderHome(){
+    const list = ops(); const sups = suppliers(list); const shown = filtered(list);
+    const total = list.reduce((t, o) => t + o.total, 0), qty = list.reduce((t, o) => t + o.qty, 0), due = list.reduce((t, o) => t + o.due, 0);
+    const cnt = c => list.filter(o => o.cats.has(c)).length;
+    let h = '<div class="pu-hero"><div class="pu-hero-top"><div><small>PURCHASES</small><h2>🛒 إدارة المشتريات</h2><p>كل صنف بتشتريه بيروح لقسمه لوحده</p></div></div><div class="pu-tiles"><div><span>العمليات</span><b>' + list.length + '</b></div><div><span>الإجمالي</span><b>' + fmt(total) + '</b></div><div><span>القطع</span><b>' + qty + '</b></div><div class="r"><span>عليك للموردين</span><b>' + fmt(due) + '</b></div></div></div>';
+    h += '<div class="pu-cats">' + Object.keys(CATS).map(c => '<button type="button" class="pu-cc' + (S.cat === c ? ' on' : '') + '" data-pu-cat="' + c + '"><span class="pu-ci" style="background:' + CATS[c].grad + '">' + CATS[c].icon + '</span><strong>' + CATS[c].label + '</strong><small>' + cnt(c) + ' عملية</small></button>').join('') + '</div>';
+    h += '<div class="pu-tabs"><button type="button" class="pu-tab on" data-pu-tab="new"><span style="background:linear-gradient(135deg,#ea580c,#fbbf24)">➕</span><div><strong>شراء جديد</strong><small>تسجيل عملية</small></div></button><button type="button" class="pu-tab" data-pu-tab="suppliers"><span style="background:linear-gradient(135deg,#0891b2,#22d3ee)">🏢</span><div><strong>حسابات الموردين</strong><small>' + sups.length + ' مورد · ' + sups.filter(g => g.due > 0).length + ' عليك لهم</small></div></button></div>';
+    h += '<div class="pu-search"><span>🔎</span><input type="search" id="pu-search" placeholder="ابحث باسم المنتج أو المورد أو رقم الفاتورة" value="' + esc(S.q) + '"></div>';
+    h += '<div class="pu-chips">' + [['all', 'الكل ' + list.length], ['paid', 'مدفوعة'], ['due', 'آجل'], ['today', 'اليوم'], ['month', 'الشهر ده']].map(f => '<button type="button" class="pu-chip' + (S.st === f[0] ? ' on' : '') + '" data-pu-st="' + f[0] + '">' + f[1] + '</button>').join('') + '</div>';
+    h += shown.length ? '<div class="pu-list">' + shown.map(opCard).join('') + '</div>' : '<div class="pu-empty">' + (list.length ? 'مفيش عمليات مطابقة.' : 'لسه مفيش عمليات شراء. اضغط «شراء جديد» وابدأ.') + '</div>';
+    return h;
+  }
+
+  /* ---------- rendering: suppliers ---------- */
+  function renderSuppliers(){
+    const list = ops(); const sups = suppliers(list); const q = norm(S.supQ);
+    const shown = sups.filter(g => !q || norm(g.name).includes(q) || g.phone.includes(S.supQ));
+    let h = '<button type="button" class="pu-back" data-pu-tab="home">→ المشتريات</button><div class="pu-hero" style="background:linear-gradient(135deg,#0e7490,#0891b2 60%,#22d3ee)"><div class="pu-hero-top"><div><small>SUPPLIERS</small><h2>🏢 حسابات الموردين</h2><p>كام اشتريت من كل مورد وكام عليك له</p></div></div><div class="pu-tiles three"><div><span>الموردين</span><b>' + sups.length + '</b></div><div><span>إجمالي المشتريات</span><b>' + fmt(sups.reduce((t, g) => t + g.total, 0)) + '</b></div><div class="r"><span>عليك</span><b>' + fmt(sups.reduce((t, g) => t + g.due, 0)) + '</b></div></div></div>';
+    h += '<div class="pu-search"><span>🔎</span><input type="search" id="pu-sup-search" placeholder="ابحث باسم المورد أو رقمه" value="' + esc(S.supQ) + '"></div>';
+    h += shown.length ? '<div class="pu-list">' + shown.map(g => '<button type="button" class="pu-sup-card' + (g.due > 0 ? ' due' : '') + '" data-pu-sup="' + esc(g.key) + '"><span class="pu-av">' + esc((g.name.trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('')) || '؟') + '</span><span class="pu-sm"><strong>' + esc(g.name) + '</strong><small>' + esc(g.phone || 'بدون رقم') + ' · ' + g.ops.length + ' عملية</small></span><span class="pu-smoney"><b>' + fmt(g.total) + ' ج</b>' + (g.due > 0 ? '<em>عليك ' + fmt(g.due) + '</em>' : '<i>مسدد</i>') + '</span></button>').join('') + '</div>' : '<div class="pu-empty">مفيش موردين لسه.</div>';
+    return h;
+  }
+  function renderSupplier(){
+    const list = ops(); const g = suppliers(list).find(x => x.key === S.supKey);
+    if (!g) { S.tab = 'suppliers'; return renderSuppliers(); }
+    const map = new Map(); g.ops.forEach(o => o.lines.forEach(l => { const k = norm(l.product); if (!map.has(k)) map.set(k, { name: l.product, qty: 0, value: 0 }); const r = map.get(k); r.qty += num(l.quantity); r.value += num(l.total); }));
+    let h = '<button type="button" class="pu-back" data-pu-tab="suppliers">→ كل الموردين</button><div class="pu-hero" style="background:linear-gradient(135deg,#0e7490,#0891b2 60%,#22d3ee)"><div class="pu-hero-top"><div><small>SUPPLIER ACCOUNT</small><h2>🏢 ' + esc(g.name) + '</h2><p>' + esc(g.phone || 'بدون رقم') + ' · ' + g.ops.length + ' عملية</p></div></div><div class="pu-tiles three"><div><span>إجمالي المشتريات</span><b>' + fmt(g.total) + '</b></div><div><span>المدفوع</span><b>' + fmt(g.paid) + '</b></div><div class="r"><span>عليك له</span><b>' + fmt(g.due) + '</b></div></div></div>';
+    h += '<div class="pu-box"><div class="pu-boxh"><h4>كل اللي اشتريته منه</h4><button type="button" class="pu-mini" data-pu-stmt="' + esc(g.key) + '">🖨️ كشف حساب</button></div>' + [...map.values()].map(r => '<div class="pu-row2"><span>' + esc(r.name) + '</span><span>' + r.qty + '</span><b>' + fmt(r.value) + ' ج</b></div>').join('') + '</div>';
+    if (g.due > 0) h += '<div class="pu-box"><div class="pu-boxh"><h4>💵 دفعة للمورد</h4></div><div class="pu-row"><input type="number" min="0" step="0.01" inputmode="decimal" id="pu-supplier-pay" placeholder="المبلغ (عليك ' + fmt(g.due) + ')"><button type="button" class="pu-go" data-pu-paysup="' + esc(g.key) + '">تأكيد</button></div><p class="pu-hint">الدفعة بتتوزع على أقدم العمليات اللي عليها متبقي.</p></div>';
+    h += '<div class="pu-list">' + g.ops.map(opCard).join('') + '</div>';
+    return h;
+  }
+
+  /* ---------- rendering: new purchase form ---------- */
+  function routeText(r){
+    const name = String(r.name || '').trim(); if (!name) return '';
+    if (r.cat === 'phones') return '📱 هيتسجل في «مشتريات التلفونات» (قسم الأجهزة)';
+    const guess = window.actAccessoryCats ? (r.sub || window.actAccessoryCats.guess(name)) : '';
+    const exist = ACC() ? ACC().read().find(x => norm(x.name) === norm(name)) : null;
+    return exist ? '➕ هيزيد في مخزون «' + esc(exist.name) + '» (' + accLabel(exist.category || guess) + ') · متاح ' + num(exist.quantity) : '🆕 هيتعمل صنف جديد في الإكسسوارات › ' + accLabel(guess);
+  }
+  function rowHtml(r, i){
+    const sel = accCats().length ? '<div class="sn-f"><label>القسم في الإكسسوارات</label><select data-pu-sub="' + i + '"><option value="">تلقائي (حسب الاسم)</option>' + accCats().map(c => '<option value="' + c.id + '"' + (r.sub === c.id ? ' selected' : '') + '>' + c.icon + ' ' + c.label + '</option>').join('') + '</select></div>' : '';
+    return '<div class="sn-item pu-rowitem" data-pu-row="' + i + '"><div class="sn-itop"><b>الصنف ' + (i + 1) + '</b>' + (S.rows.length > 1 ? '<button type="button" class="sn-remove" data-pu-rm="' + i + '">🗑️ حذف</button>' : '') + '</div>' +
+      '<div class="sn-seg">' + Object.keys(CATS).map(c => '<button type="button" class="' + (r.cat === c ? 'on' : '') + '" data-pu-rowcat="' + i + ':' + c + '">' + CATS[c].icon + ' ' + CATS[c].label + '</button>').join('') + '</div>' +
+      '<div class="sn-f sn-rel"><label>اسم المنتج</label><input type="text" data-pu-f="name" data-pu-i="' + i + '" data-pu-suggest="1" autocomplete="off" placeholder="🔎 اسم الجهاز أو المنتج" value="' + esc(r.name) + '"><div class="sn-suggest" hidden></div></div>' +
+      (r.cat !== 'phones' ? sel : '') +
+      '<div class="sn-r2"><div class="sn-f"><label>الكمية</label><div class="sn-step"><button type="button" data-pstep="' + i + ':1">＋</button><input type="number" min="1" step="1" inputmode="numeric" data-pu-f="qty" data-pu-i="' + i + '" value="' + esc(r.qty) + '"><button type="button" data-pstep="' + i + ':-1">−</button></div></div>' +
+      '<div class="sn-f"><label>سعر القطعة (شراء)</label><input type="number" min="0" step="0.01" inputmode="decimal" data-pu-f="price" data-pu-i="' + i + '" placeholder="💵 0.00" value="' + esc(r.price) + '"></div></div>' +
+      (r.cat !== 'phones' ? '<div class="sn-f"><label>سعر البيع (اختياري)</label><input type="number" min="0" step="0.01" inputmode="decimal" data-pu-f="sell" data-pu-i="' + i + '" placeholder="🏷️ لو سبته فاضي هيتحسب +20%" value="' + esc(r.sell) + '"></div>' : '') +
+      '<div class="pu-route" data-pu-route="' + i + '">' + routeText(r) + '</div><div class="sn-line"><span>إجمالي الصنف</span><b data-pu-line="' + i + '">0 ج</b></div></div>';
+  }
+  function renderForm(){
+    const list = ops(); const f = S.keep || {};
+    let h = '<button type="button" class="pu-back" data-pu-tab="home">→ المشتريات</button><div class="pu-hero"><div class="pu-hero-top"><div><small>NEW PURCHASE</small><h2>➕ تسجيل عملية شراء</h2><p>أضف الأصناف واحسب المدفوع والمتبقي للمورد</p></div><div class="pu-inv"><span>رقم العملية</span><b>#' + (list.length + 1) + '</b></div></div><div class="pu-tiles"><div><span>الأصناف</span><b id="pu-t-items">0</b></div><div><span>القطع</span><b id="pu-t-qty">0</b></div><div><span>الإجمالي</span><b id="pu-t-total">0</b></div><div class="r"><span>المتبقي</span><b id="pu-t-due">0</b></div></div></div>';
+    if (S.formErr) h += '<div class="sa-error">' + esc(S.formErr) + '</div>';
+    h += '<div class="sn-card"><div class="sn-ch"><div class="sn-ci" style="background:linear-gradient(135deg,#7c3aed,#c084fc)">🏢</div><div><strong>المورد</strong><small>اكتب أول حروف الاسم وهيظهر المورد المسجل</small></div></div>' +
+      '<div class="sn-f sn-rel"><label>اسم المورد</label><input type="text" id="pu-supplier" data-pu-suggest="sup" autocomplete="off" placeholder="🏢 اسم المورد" value="' + esc(f.supplier || '') + '"><div class="sn-suggest" hidden></div></div>' +
+      '<div class="sn-f"><label>رقم المورد</label><input type="tel" inputmode="tel" id="pu-supplier-phone" placeholder="📞 رقم الهاتف" value="' + esc(f.phone || '') + '"></div><div id="pu-bal" class="sn-balance" hidden></div></div>';
+    h += '<div class="sn-card"><div class="sn-ch"><div class="sn-ci" style="background:linear-gradient(135deg,#ea580c,#fbbf24)">📦</div><div><strong>الأصناف</strong><small>كل صنف هيروح لقسمه تلقائيًا</small></div></div>' + S.rows.map(rowHtml).join('') + '<button type="button" class="sn-add" data-pu-addrow>＋ إضافة صنف آخر</button></div>';
+    h += '<div class="sn-card"><div class="sn-ch"><div class="sn-ci" style="background:linear-gradient(135deg,#059669,#34d399)">💰</div><div><strong>الدفع</strong><small>المدفوع والتاريخ وصورة الفاتورة</small></div></div>' +
+      '<div class="sn-r2"><div class="sn-f"><label>المدفوع</label><input type="number" min="0" step="0.01" inputmode="decimal" id="pu-paid" value="' + esc(f.paid != null ? f.paid : 0) + '"></div><div class="sn-f"><label>تاريخ الشراء</label><input type="date" id="pu-date" value="' + esc(f.date || todayStr()) + '"></div></div>' +
+      '<div class="sn-chips sn-gap"><button type="button" class="sn-chip" data-pu-pay="all">كامل المبلغ</button><button type="button" class="sn-chip" data-pu-pay="half">النص</button><button type="button" class="sn-chip" data-pu-pay="none">آجل بالكامل</button></div>' +
+      '<div class="sn-f" id="pu-due-field" hidden><label>موعد سداد المتبقي</label><input type="date" id="pu-due-date" value="' + esc(f.dueDate || '') + '"><div class="sn-chips"><button type="button" class="sn-chip" data-pu-dd="7">بعد أسبوع</button><button type="button" class="sn-chip" data-pu-dd="15">15 يوم</button><button type="button" class="sn-chip" data-pu-dd="30">بعد شهر</button></div></div>' +
+      '<div class="sn-f"><label>رقم فاتورة المورد</label><input type="text" id="pu-invno" placeholder="🧾 رقم الفاتورة" value="' + esc(f.invoiceNo || '') + '"></div>' +
+      '<div class="sn-f"><label>ملاحظات</label><textarea id="pu-notes" rows="3" placeholder="📝 تفاصيل إضافية">' + esc(f.notes || '') + '</textarea></div>' +
+      '<div class="sn-f"><label>صورة فاتورة المورد</label><div class="dv-photos">' + (S.photo ? '<div class="dv-pho"><img alt="" data-ref="' + esc(S.photo) + '"><button type="button" data-pu-rmphoto aria-label="حذف">×</button></div>' : '') + '<button type="button" class="dv-pho add" data-pu-pickphoto>＋</button></div><input type="file" accept="image/*" hidden id="pu-photo-input"></div></div>';
+    h += '<div class="sn-card"><div class="sn-tot"><span>إجمالي الأصناف</span><strong id="pu-s-total">0 ج</strong></div><div class="sn-big"><span>المتبقي للمورد</span><strong id="pu-s-due">0 ج</strong></div><div class="sn-after" id="pu-after" hidden></div><div class="sn-acts"><button type="button" class="sn-btn" data-pu-clear>🗑️ مسح</button><button type="button" class="sn-btn sn-main" style="background:linear-gradient(135deg,#ea580c,#fbbf24)" data-pu-save>💾 حفظ عملية الشراء</button></div></div>';
+    return h;
+  }
+  function render(){
+    if (!root) return;
+    const keepId = document.activeElement && document.activeElement.id; const pos = document.activeElement && document.activeElement.selectionStart;
+    root.innerHTML = S.tab === 'new' ? renderForm() : S.tab === 'suppliers' ? renderSuppliers() : S.tab === 'supplier' ? renderSupplier() : renderHome();
+    if (window.actHydrateImages) window.actHydrateImages(root);
+    if (S.tab === 'new') refreshForm();
+    if (keepId && /search/.test(keepId) && $(keepId)) { const el = $(keepId); el.focus(); try { el.setSelectionRange(pos, pos); } catch (_) {} }
+    if (S.modal) renderModal();
+  }
+  function captureForm(){
+    if (S.tab !== 'new' || !root) return;
+    const g = id => { const e = $(id); return e ? e.value : ''; };
+    S.keep = { supplier: g('pu-supplier'), phone: g('pu-supplier-phone'), paid: g('pu-paid'), date: g('pu-date'), dueDate: g('pu-due-date'), invoiceNo: g('pu-invno'), notes: g('pu-notes') };
+    root.querySelectorAll('[data-pu-f]').forEach(el => { const r = S.rows[Number(el.dataset.puI)]; if (r) r[el.dataset.puF] = el.value; });
+  }
+  function totalsNow(){
+    let total = 0, qty = 0; S.rows.forEach(r => { total += num(r.qty) * num(r.price); qty += Math.max(0, num(r.qty)); });
+    const paid = num(($('pu-paid') || {}).value); return { total, qty, paid, due: Math.max(0, total - paid) };
+  }
+  function refreshForm(){
+    root.querySelectorAll('[data-pu-f]').forEach(el => { const r = S.rows[Number(el.dataset.puI)]; if (r) r[el.dataset.puF] = el.value; });
+    const t = totalsNow(); const set = (id, v) => { const e = $(id); if (e) e.textContent = v; };
+    set('pu-t-items', String(S.rows.filter(r => String(r.name).trim()).length || S.rows.length)); set('pu-t-qty', String(t.qty)); set('pu-t-total', fmt(t.total)); set('pu-t-due', fmt(t.due)); set('pu-s-total', fmt(t.total) + ' ج'); set('pu-s-due', fmt(t.due) + ' ج');
+    S.rows.forEach((r, i) => { const l = root.querySelector('[data-pu-line="' + i + '"]'); if (l) l.textContent = fmt(num(r.qty) * num(r.price)) + ' ج'; const rt = root.querySelector('[data-pu-route="' + i + '"]'); if (rt) rt.innerHTML = routeText(r); });
+    const dueField = $('pu-due-field'); if (dueField) dueField.hidden = !(t.due > 0);
+    const name = norm(($('pu-supplier') || {}).value), phone = String(($('pu-supplier-phone') || {}).value || '').trim();
+    const sup = (name || phone) ? suppliers(ops()).find(g => (phone && g.phone === phone) || (name && norm(g.name) === name)) : null;
+    const bal = $('pu-bal'); if (bal) { if (sup) { bal.hidden = false; bal.className = 'sn-balance ' + (sup.due > 0 ? 'bad' : 'ok'); bal.innerHTML = sup.due > 0 ? '<span>⚠️</span><div><b>عليك له من قبل ' + fmt(sup.due) + ' جنيه</b><small>' + sup.ops.length + ' عملية سابقة</small></div>' : '<span>✅</span><div><b>حسابه مسدد</b><small>' + sup.ops.length + ' عملية سابقة</small></div>'; } else bal.hidden = true; }
+    const after = $('pu-after'); if (after) { if (sup && sup.due > 0 && t.due > 0) { after.hidden = false; after.innerHTML = 'إجمالي اللي عليك للمورد بعد العملية دي: <b>' + fmt(sup.due + t.due) + ' جنيه</b> (' + fmt(sup.due) + ' سابق + ' + fmt(t.due) + ' جديد)'; } else after.hidden = true; }
+  }
+
+  /* ---------- routing: every item goes to its own section ---------- */
+  function routeAccessory(line, opNo){
+    const store = ACC(); if (!store) return null;
+    const list = store.read(); const name = String(line.product).trim(); const qty = Math.max(1, Math.floor(num(line.quantity)));
+    const guess = line.subCategory || (window.actAccessoryCats ? window.actAccessoryCats.guess(name) : 'misc');
+    let item = list.find(x => norm(x.name) === norm(name)); let created = false;
+    if (item) {
+      const oldQty = num(item.quantity), oldCost = num(item.cost);
+      item.cost = Math.round(((oldQty * oldCost + qty * num(line.unitPrice)) / Math.max(1, oldQty + qty)) * 100) / 100;
+      item.quantity = oldQty + qty; if (num(line.sellPrice) > 0) item.price = num(line.sellPrice); if (!item.category) item.category = guess; item.updatedAt = new Date().toISOString();
+    } else {
+      created = true; const unit = num(line.unitPrice);
+      item = { id: 'acc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), name, code: '', model: '', color: '', category: guess, attrs: {}, quantity: qty, cost: unit, price: num(line.sellPrice) > 0 ? num(line.sellPrice) : Math.round(unit * 1.2), minStock: 3, photo: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      list.unshift(item);
+    }
+    if (!store.save(list)) return null;
+    const moves = store.readMovements(); moves.unshift({ id: 'accmove_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5), itemId: item.id, name: item.name, kind: 'stock_in', quantity: qty, delta: qty, date: new Date().toISOString(), note: 'فاتورة شراء #' + opNo }); store.saveMovements(moves);
+    return { type: 'accessory', itemId: item.id, qty, created, category: item.category };
+  }
+  function unrouteAccessory(r, name){
+    const store = ACC(); if (!store || !r || !r.itemId) return '';
+    const list = store.read(); const item = list.find(x => x.id === r.itemId); if (!item) return '';
+    const cut = Math.min(num(item.quantity), num(r.qty)); item.quantity = num(item.quantity) - cut; item.updatedAt = new Date().toISOString();
+    const next = (r.created && item.quantity <= 0) ? list.filter(x => x.id !== item.id) : list;
+    store.save(next);
+    const moves = store.readMovements(); moves.unshift({ id: 'accmove_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5), itemId: item.id, name: item.name, kind: 'stock_out', quantity: cut, delta: -cut, date: new Date().toISOString(), note: 'حذف عملية شراء' }); store.saveMovements(moves);
+    return item.name + ' (−' + cut + ')';
+  }
+
+  /* ---------- actions ---------- */
+  function saveNew(){
+    captureForm(); const k = S.keep || {};
+    const supplier = String(k.supplier || '').trim(); const date = k.date; const paid = num(k.paid);
+    if (!date) return fail('اختر تاريخ الشراء.');
+    const lines = [];
+    for (let i = 0; i < S.rows.length; i++) {
+      const r = S.rows[i]; const name = String(r.name || '').trim(); const qty = Number(r.qty), price = Number(r.price);
+      if (!name) return fail('اكتب اسم الصنف رقم ' + (i + 1) + '.');
+      if (!Number.isInteger(qty) || qty < 1) return fail('الكمية في الصنف ' + (i + 1) + ' لازم تكون رقم صحيح أكبر من صفر.');
+      if (!Number.isFinite(price) || price < 0 || String(r.price).trim() === '') return fail('اكتب سعر الشراء للصنف ' + (i + 1) + '.');
+      lines.push({ product: name, category: r.cat, quantity: qty, unitPrice: price, sellPrice: num(r.sell), subCategory: r.cat === 'phones' ? '' : (r.sub || '') });
+    }
+    const total = lines.reduce((t, l) => t + l.quantity * l.unitPrice, 0);
+    if (paid < 0 || paid > total + 0.001) return fail('المدفوع لازم يكون بين 0 وإجمالي العملية (' + fmt(total) + ').');
+    const existing = API().get(); const invoiceId = API().makeId(); const nowIso = new Date().toISOString(); const opNo = ops().length + 1;
+    const records = lines.map((l, i) => {
+      const lt = l.quantity * l.unitPrice; const lp = total > 0 ? paid * (lt / total) : (i === 0 ? paid : 0);
+      const rec = { id: API().makeId(), invoiceId, invoiceLine: i + 1, invoiceLinesCount: lines.length, product: l.product, supplier, supplierPhone: String(k.phone || '').trim(), quantity: l.quantity, unitPrice: l.unitPrice, total: lt, paid: lp, date, notes: String(k.notes || '').trim(), category: l.category, sellPrice: l.sellPrice, subCategory: l.subCategory, updatedAt: nowIso, createdAt: nowIso };
+      if (i === 0) { rec.dueDate = String(k.dueDate || ''); rec.invoiceNo = String(k.invoiceNo || '').trim(); rec.invoicePhoto = S.photo || ''; rec.payments = paid > 0 ? [{ amount: paid, date: nowIso }] : []; rec.history = [{ t: 'تم إنشاء العملية', d: nowIso }]; }
+      return rec;
+    });
+    // route accessories / parts into their own accessory category
+    const report = []; let phones = 0;
+    records.forEach(rec => {
+      if (rec.category === 'phones') { phones += rec.quantity; rec.routed = { type: 'phone' }; return; }
+      const r = routeAccessory(rec, opNo); if (r) { rec.routed = r; report.push((r.created ? '🆕 ' : '➕ ') + rec.product + ' → ' + accLabel(r.category)); }
+    });
+    if (!API().set(records.concat(existing))) { S.formErr = 'تعذر حفظ العملية. مساحة التخزين ممتلئة؟'; render(); return; }
+    // phones keep the existing device-stock link, then the purchase is shown inside Devices > مشتريات التلفونات
+    records.filter(r => r.category === 'phones').forEach(r => { try { window.actPhoneInventoryUpsertPurchase && window.actPhoneInventoryUpsertPurchase('independent', r, null); } catch (_) {} });
+    S.photo = ''; S.keep = null; resetForm(); S.tab = 'home'; S.formErr = ''; render();
+    alert('تم حفظ عملية الشراء ✅' + (report.length ? '\n' + report.join('\n') : '') + (phones ? '\n📱 ' + phones + ' جهاز → مشتريات التلفونات' : ''));
+    if (phones) { const nav = $('nav-devices'); if (nav) nav.click(); setTimeout(function () { const tb = $('device-purchase-tab'); if (tb) tb.click(); }, 120); }
+  }
+  function fail(msg){ S.formErr = msg; captureForm(); render(); root.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  function updateOp(opId, mut){
+    const all = API().get(); const o = ops().find(x => x.id === opId); if (!o) return false;
+    const ids = new Set(o.lines.map(l => l.id)); const next = all.map(r => { if (!ids.has(r.id)) return r; const c = Object.assign({}, r); mut(c, c.id === o.first.id); return c; });
+    return API().set(next);
+  }
+  function addPayment(o, amount){
+    const due = o.due; if (amount <= 0 || amount > due + 0.001) return false;
+    const nowIso = new Date().toISOString();
+    return updateOp(o.id, (r, isFirst) => {
+      const lineDue = Math.max(0, num(r.total) - num(r.paid)); const share = due > 0 ? amount * (lineDue / due) : 0; r.paid = num(r.paid) + share; r.updatedAt = nowIso;
+      if (isFirst) { r.payments = [{ amount, date: nowIso }].concat(r.payments || []); r.history = [{ t: 'دفعة ' + fmt(amount) + ' ج', d: nowIso }].concat(r.history || []); }
+    });
+  }
+  function deleteOp(o){
+    const back = []; o.lines.forEach(l => {
+      if (l.routed && l.routed.type === 'accessory') { const t = unrouteAccessory(l.routed, l.product); if (t) back.push(t); }
+      else if (l.category === 'phones') { try { window.actPhoneInventoryRemovePurchase && window.actPhoneInventoryRemovePurchase('independent', l); } catch (_) {} }
+    });
+    const ids = new Set(o.lines.map(l => l.id)); const first = o.first;
+    if (!API().set(API().get().filter(r => !ids.has(r.id)))) return;
+    if (first && first.invoicePhoto && window.actImgDB) window.actImgDB.del(first.invoicePhoto);
+    S.modal = ''; render(); alert('تم حذف العملية' + (back.length ? ' وتم خصم الكمية من الإكسسوارات: ' + back.join('، ') : ''));
+  }
+
+  /* ---------- modal ---------- */
+  function modalRoot(){
+    let m = $('pur2-modal');
+    if (!m) { m = document.createElement('div'); m.id = 'pur2-modal'; m.className = 'sa-modal'; m.hidden = true; m.innerHTML = '<div class="sa-sheet" role="dialog" aria-modal="true"></div>'; document.body.appendChild(m); m.addEventListener('click', onModalClick); }
+    return m;
+  }
+  function renderModal(){
+    const m = modalRoot(); const o = ops().find(x => x.id === S.modal);
+    if (!o) { m.hidden = true; document.documentElement.classList.remove('sa-lock'); S.modal = ''; return; }
+    const st = status(o); const f = o.first;
+    let h = '<div class="sa-sheet-head"><div><span>عملية شراء</span><h3>#' + o.no + '</h3></div><span class="sa-pill sa-pill-' + st.c + '">' + st.t + '</span><button type="button" class="sa-x" data-pm-close aria-label="إغلاق">✕</button></div><div class="sa-sheet-body">';
+    if (S.mErr) h += '<div class="sa-error">' + esc(S.mErr) + '</div>';
+    if (S.mEdit) {
+      h += '<div class="sa-grid2"><label>المورد<input id="pm-sup" value="' + esc(o.supplier) + '"></label><label>رقم المورد<input id="pm-phone" value="' + esc(o.supplierPhone) + '"></label></div><div class="sa-grid2"><label>التاريخ<input type="date" id="pm-date" value="' + esc(o.date) + '"></label><label>موعد السداد<input type="date" id="pm-due" value="' + esc(o.dueDate) + '"></label></div><div class="sa-grid2"><label>رقم فاتورة المورد<input id="pm-inv" value="' + esc(o.invoiceNo) + '"></label><label>ملاحظات<input id="pm-notes" value="' + esc(o.notes) + '"></label></div><p class="sa-hint">لتعديل الأصناف أو الكميات: احذف العملية وسجّلها من جديد، عشان المخزون يتعدّل صح.</p>';
+    } else {
+      h += '<div class="sa-meta"><span>🏢 ' + esc(o.supplier || 'بدون مورد') + (o.supplierPhone ? ' · ' + esc(o.supplierPhone) : '') + '</span><span>📅 ' + esc(o.date) + '</span>' + (o.due > 0 && o.dueDate ? '<span>⏰ السداد: ' + esc(o.dueDate) + '</span>' : '') + (o.invoiceNo ? '<span>🧾 ' + esc(o.invoiceNo) + '</span>' : '') + '</div>';
+    }
+    h += '<div class="sa-items">' + o.lines.map(l => { const r = l.routed; const where = l.category === 'phones' ? '📱 في مشتريات التلفونات' : (r && r.type === 'accessory' ? (r.created ? '🆕 اتعمل صنف في ' : '➕ زاد في ') + accLabel(r.category) : ''); return '<div class="sa-item"><div><strong>' + esc(l.product) + '</strong><small>' + (CATS[l.category] ? CATS[l.category].icon + ' ' + CATS[l.category].label : '') + '</small>' + (where ? '<small class="pu-where">' + where + '</small>' : '') + '</div><div class="sa-item-end"><span>' + num(l.quantity) + ' × ' + fmt(l.unitPrice) + '</span><b>' + fmt(l.total) + ' ج</b></div></div>'; }).join('') + '</div>';
+    h += '<div class="sa-totals"><div><span>الإجمالي</span><b>' + fmt(o.total) + ' ج</b></div><div class="ok"><span>المدفوع</span><b>' + fmt(o.paid) + ' ج</b></div><div class="bad"><span>المتبقي</span><b>' + fmt(o.due) + ' ج</b></div></div>';
+    if (f.invoicePhoto) h += '<div class="pu-invphoto"><img alt="فاتورة المورد" data-ref="' + esc(f.invoicePhoto) + '"></div>';
+    if (S.mPanel === 'pay' && o.due > 0) h += '<div class="sa-panel"><h4>تسجيل دفعة للمورد</h4><div class="sa-row"><input type="number" min="0" step="0.01" inputmode="decimal" id="pm-pay" placeholder="المبلغ (المتبقي ' + fmt(o.due) + ')"><button type="button" class="sa-btn sa-btn-main" data-pm-payok>تأكيد</button></div></div>';
+    h += '<div class="sa-actions">' + (S.mEdit ? '<button type="button" class="sa-btn sa-btn-main" data-pm-save>💾 حفظ التعديلات</button><button type="button" class="sa-btn" data-pm-cancel>إلغاء</button>' : '<button type="button" class="sa-btn sa-btn-main" data-pm-edit>✏️ تعديل البيانات</button>' + (o.due > 0 ? '<button type="button" class="sa-btn" data-pm-pay>💵 دفعة</button>' : '') + '<button type="button" class="sa-btn" data-pm-print>🖨️ طباعة</button><button type="button" class="sa-btn" data-pm-del style="color:var(--sa-bad)">🗑️ حذف</button>') + '</div>';
+    const log = [{ t: 'تم إنشاء العملية', d: f.createdAt || f.updatedAt }].filter(e => e.d).concat(o.history.filter(e => e.t !== 'تم إنشاء العملية'));
+    h += '<div class="sa-log"><h4>سجل العملية</h4>' + log.sort((a, b) => String(b.d).localeCompare(String(a.d))).map(e => '<div class="sa-log-row"><i></i><div><span>' + esc(e.t) + '</span><small>' + esc(fmtDT(e.d)) + '</small></div></div>').join('') + '</div></div>';
+    const sheet = m.firstElementChild; sheet.innerHTML = h; m.hidden = false; document.documentElement.classList.add('sa-lock');
+    if (window.actHydrateImages) window.actHydrateImages(sheet);
+  }
+  function printOp(o){
+    const P = window.actSalesPrint; if (!P || !P.printHtml) return;
+    const rows = o.lines.map((l, i) => '<tr><td>' + (i + 1) + '</td><td>' + esc(l.product) + '</td><td>' + num(l.quantity) + '</td><td>' + fmt(l.unitPrice) + '</td><td>' + fmt(l.total) + '</td></tr>').join('');
+    P.printHtml('عملية شراء ' + o.no, '<div class="top"><div><div class="brand">ACT Manager</div><div class="muted">فاتورة شراء</div></div><div style="text-align:left"><h1>#' + o.no + '</h1><div class="muted">' + esc(o.date) + '</div></div></div><div><b>المورد:</b> ' + esc(o.supplier || '-') + (o.supplierPhone ? ' &nbsp; <b>الهاتف:</b> ' + esc(o.supplierPhone) : '') + (o.invoiceNo ? ' &nbsp; <b>فاتورة المورد:</b> ' + esc(o.invoiceNo) : '') + '</div><table><thead><tr><th>#</th><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>' + rows + '</tbody></table><table class="tot"><tr><td>الإجمالي</td><td><b>' + fmt(o.total) + '</b></td></tr><tr><td>المدفوع</td><td class="ok">' + fmt(o.paid) + '</td></tr><tr><td>المتبقي</td><td class="due">' + fmt(o.due) + '</td></tr></table>' + (o.notes ? '<p class="muted">ملاحظات: ' + esc(o.notes) + '</p>' : ''));
+  }
+  function printStatement(key){
+    const P = window.actSalesPrint; if (!P || !P.printHtml) return; const g = suppliers(ops()).find(x => x.key === key); if (!g) return;
+    const rows = g.ops.slice().reverse().map(o => '<tr><td>#' + o.no + '</td><td>' + esc(o.date) + '</td><td>' + esc(o.lines.map(l => l.product + ' × ' + num(l.quantity)).join('، ')) + '</td><td>' + fmt(o.total) + '</td><td>' + fmt(o.paid) + '</td><td>' + fmt(o.due) + '</td></tr>').join('');
+    P.printHtml('كشف حساب مورد', '<div class="top"><div><div class="brand">ACT Manager</div><div class="muted">كشف حساب مورد</div></div><div style="text-align:left"><h1>' + esc(g.name) + '</h1><div class="muted">' + esc(g.phone) + ' · ' + new Date().toLocaleDateString('en-GB') + '</div></div></div><table><thead><tr><th>العملية</th><th>التاريخ</th><th>الأصناف</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th></tr></thead><tbody>' + rows + '</tbody></table><table class="tot"><tr><td>إجمالي المشتريات</td><td><b>' + fmt(g.total) + '</b></td></tr><tr><td>إجمالي المدفوع</td><td class="ok">' + fmt(g.paid) + '</td></tr><tr><td>المتبقي للمورد</td><td class="due">' + fmt(g.due) + '</td></tr></table>');
+  }
+  function onModalClick(e){
+    const t = e.target; if (!t.closest) return; const m = $('pur2-modal'); const o = ops().find(x => x.id === S.modal);
+    if (t === m || t.closest('[data-pm-close]')) { S.modal = ''; S.mEdit = false; S.mPanel = ''; S.mErr = ''; m.hidden = true; document.documentElement.classList.remove('sa-lock'); return; }
+    if (!o) return;
+    if (t.closest('[data-pm-edit]')) { S.mEdit = true; S.mPanel = ''; S.mErr = ''; renderModal(); return; }
+    if (t.closest('[data-pm-cancel]')) { S.mEdit = false; S.mErr = ''; renderModal(); return; }
+    if (t.closest('[data-pm-pay]')) { S.mPanel = S.mPanel === 'pay' ? '' : 'pay'; S.mErr = ''; renderModal(); return; }
+    if (t.closest('[data-pm-print]')) { printOp(o); return; }
+    if (t.closest('[data-pm-del]')) { if (confirm('حذف عملية الشراء #' + o.no + '؟ الكميات اللي اتضافت للإكسسوارات هتتخصم.')) deleteOp(o); return; }
+    if (t.closest('[data-pm-payok]')) { const a = Number(($('pm-pay') || {}).value); if (!Number.isFinite(a) || a <= 0) { S.mErr = 'اكتب مبلغ صحيح.'; renderModal(); return; } if (a > o.due + 0.001) { S.mErr = 'المبلغ أكبر من المتبقي (' + fmt(o.due) + ').'; renderModal(); return; } if (addPayment(o, a)) { S.mPanel = ''; S.mErr = ''; render(); alert('تم تسجيل دفعة ' + fmt(a) + ' ج'); } return; }
+    if (t.closest('[data-pm-save]')) {
+      const v = id => String(($(id) || {}).value || '').trim(); const date = v('pm-date'); if (!date) { S.mErr = 'اختر التاريخ.'; renderModal(); return; }
+      const sup = v('pm-sup'), phone = v('pm-phone'), due = v('pm-due'), inv = v('pm-inv'), notes = v('pm-notes'); const nowIso = new Date().toISOString();
+      updateOp(o.id, (r, isFirst) => { r.supplier = sup; r.supplierPhone = phone; r.date = date; r.notes = notes; r.updatedAt = nowIso; if (isFirst) { r.dueDate = due; r.invoiceNo = inv; r.history = [{ t: 'تعديل بيانات العملية', d: nowIso }].concat(r.history || []); } });
+      S.mEdit = false; S.mErr = ''; render(); alert('تم حفظ التعديلات'); return;
+    }
+  }
+
+  /* ---------- delegated events ---------- */
+  function hideSuggest(){ root && root.querySelectorAll('.sn-suggest').forEach(b => { b.hidden = true; }); }
+  function showSuggest(input){
+    const kind = input.dataset.puSuggest; const q = norm(input.value); let box = input.parentElement.querySelector('.sn-suggest'); if (!box) return;
+    let items = [];
+    if (kind === 'sup') {
+      items = suppliers(ops()).filter(g => g.name !== 'بدون مورد' && (!q || norm(g.name).includes(q))).slice(0, 6);
+      box.innerHTML = items.map((g, i) => '<button type="button" class="sn-sg" data-pu-pick="' + i + '"><span class="sn-sg-ic">🏢</span><span class="sn-sg-main"><b>' + esc(g.name) + '</b><small>' + esc(g.phone || 'بدون رقم') + '</small></span><span class="sn-sg-price' + (g.due > 0 ? ' bad' : '') + '">' + (g.due > 0 ? 'عليك ' + fmt(g.due) : 'مسدد') + '</span></button>').join('');
+    } else {
+      const i0 = Number(input.dataset.puI); const row = S.rows[i0]; const seen = new Set();
+      const pool = [];
+      if (row && row.cat !== 'phones' && ACC()) ACC().read().forEach(a => pool.push({ name: a.name, cost: a.cost, price: a.price, tag: 'متاح ' + num(a.quantity), cat: row.cat }));
+      API().get().filter(l => !row || l.category === row.cat).forEach(l => pool.push({ name: l.product, cost: l.unitPrice, price: l.sellPrice || '', tag: 'آخر سعر ' + fmt(l.unitPrice), cat: l.category }));
+      items = pool.filter(x => { const k = norm(x.name); if (seen.has(k)) return false; seen.add(k); return !q || k.includes(q); }).slice(0, 6);
+      box.innerHTML = items.map((x, i) => '<button type="button" class="sn-sg" data-pu-pick="' + i + '"><span class="sn-sg-ic">' + (CATS[x.cat] ? CATS[x.cat].icon : '📦') + '</span><span class="sn-sg-main"><b>' + esc(x.name) + '</b><small>' + esc(x.tag) + '</small></span><span class="sn-sg-price">' + fmt(x.cost) + ' ج</span></button>').join('');
+    }
+    box._items = items; box._kind = kind; hideSuggest(); box.hidden = !items.length;
+  }
+  function pickSuggest(box, idx){
+    const it = (box._items || [])[idx]; if (!it) return; const input = box.parentElement.querySelector('[data-pu-suggest]');
+    if (box._kind === 'sup') { input.value = it.name; const ph = $('pu-supplier-phone'); if (ph) ph.value = it.phone || ''; }
+    else { const r = S.rows[Number(input.dataset.puI)]; if (r) { r.name = it.name; r.price = r.price || it.cost; if (it.price) r.sell = r.sell || it.price; input.value = it.name; captureForm(); render(); return; } }
+    box.hidden = true; refreshForm();
+  }
+  function bind(){
+    document.addEventListener('mousedown', function (e) {
+      if (!root) return; const sg = e.target.closest && e.target.closest('#pur2-root .sn-sg'); if (sg) { e.preventDefault(); pickSuggest(sg.parentElement, Number(sg.dataset.puPick)); return; }
+      if (!(e.target.closest && e.target.closest('#pur2-root .sn-rel'))) hideSuggest();
+    });
+    document.addEventListener('input', function (e) {
+      const t = e.target; if (!t.closest || !t.closest('#pur2-root')) return;
+      if (t.id === 'pu-search') { S.q = t.value; render(); return; }
+      if (t.id === 'pu-sup-search') { S.supQ = t.value; render(); return; }
+      if (t.dataset.puSuggest) showSuggest(t);
+      if (S.tab === 'new') refreshForm();
+    });
+    document.addEventListener('focusin', function (e) { const t = e.target; if (t.dataset && t.dataset.puSuggest && t.closest('#pur2-root')) showSuggest(t); });
+    document.addEventListener('change', async function (e) {
+      const t = e.target; if (!t.closest || !t.closest('#pur2-root')) return;
+      if (t.dataset.puSub != null) { S.rows[Number(t.dataset.puSub)].sub = t.value; refreshForm(); return; }
+      if (t.id === 'pu-photo-input' && t.files && t.files[0]) {
+        captureForm(); const d = window.actReadImage ? await window.actReadImage(t.files[0], 1000, 0.7) : ''; if (!d) return;
+        const ref = window.actImgDB ? await window.actImgDB.put(d) : d; if (S.photo && window.actImgDB) window.actImgDB.del(S.photo); S.photo = ref; render();
+      }
+    });
+    document.addEventListener('click', function (e) {
+      const t = e.target; if (!t.closest || !t.closest('#pur2-root')) return;
+      const tab = t.closest('[data-pu-tab]'); if (tab) { captureForm(); S.tab = tab.dataset.puTab; if (S.tab === 'new' && !S.rows.length) resetForm(); render(); root.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      const cat = t.closest('[data-pu-cat]'); if (cat) { S.cat = S.cat === cat.dataset.puCat ? 'all' : cat.dataset.puCat; render(); return; }
+      const st = t.closest('[data-pu-st]'); if (st) { S.st = st.dataset.puSt; render(); return; }
+      const op = t.closest('[data-pu-open]'); if (op) { S.modal = op.dataset.puOpen; S.mEdit = false; S.mPanel = ''; S.mErr = ''; renderModal(); return; }
+      const act = t.closest('[data-pu-act]');
+      if (act) { const [a, id] = act.dataset.puAct.split(':'); const o = ops().find(x => x.id === id); if (!o) return; if (a === 'pay') { S.modal = id; S.mPanel = 'pay'; S.mEdit = false; S.mErr = ''; renderModal(); } else if (a === 'print') printOp(o); else if (a === 'del') { if (confirm('حذف عملية الشراء #' + o.no + '؟ الكميات اللي اتضافت للإكسسوارات هتتخصم.')) deleteOp(o); } return; }
+      const sup = t.closest('[data-pu-sup]'); if (sup) { S.supKey = sup.dataset.puSup; S.tab = 'supplier'; render(); root.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      const stm = t.closest('[data-pu-stmt]'); if (stm) { printStatement(stm.dataset.puStmt); return; }
+      const ps = t.closest('[data-pu-paysup]');
+      if (ps) {
+        const a = Number(($('pu-supplier-pay') || {}).value); const g = suppliers(ops()).find(x => x.key === ps.dataset.puPaysup); if (!g) return;
+        if (!Number.isFinite(a) || a <= 0 || a > g.due + 0.001) { alert('اكتب مبلغ صحيح مش أكبر من ' + fmt(g.due) + '.'); return; }
+        let left = a; g.ops.slice().reverse().forEach(o => { if (left > 0.001 && o.due > 0.001) { const p = Math.min(o.due, left); if (addPayment(o, p)) left -= p; } });
+        render(); alert('تم تسجيل دفعة ' + fmt(a - left) + ' ج للمورد'); return;
+      }
+      // new-purchase form
+      if (t.closest('[data-pu-addrow]')) { captureForm(); S.rows.push(blankRow()); render(); return; }
+      const rm = t.closest('[data-pu-rm]'); if (rm) { captureForm(); S.rows.splice(Number(rm.dataset.puRm), 1); render(); return; }
+      const rc = t.closest('[data-pu-rowcat]'); if (rc) { captureForm(); const [i, c] = rc.dataset.puRowcat.split(':'); S.rows[Number(i)].cat = c; S.rows[Number(i)].sub = ''; render(); return; }
+      const ste = t.closest('[data-pstep]'); if (ste) { captureForm(); const [i, d] = ste.dataset.pstep.split(':'); const r = S.rows[Number(i)]; r.qty = Math.max(1, Math.floor(num(r.qty) || 1) + Number(d)); render(); return; }
+      const pay = t.closest('[data-pu-pay]'); if (pay) { const tt = totalsNow(); const inp = $('pu-paid'); inp.value = pay.dataset.puPay === 'all' ? tt.total : pay.dataset.puPay === 'half' ? Math.round(tt.total / 2) : 0; refreshForm(); return; }
+      const dd = t.closest('[data-pu-dd]'); if (dd) { const inp = $('pu-due-date'); if (inp) inp.value = addDays(Number(dd.dataset.puDd)); return; }
+      if (t.closest('[data-pu-pickphoto]')) { $('pu-photo-input').click(); return; }
+      if (t.closest('[data-pu-rmphoto]')) { captureForm(); if (S.photo && window.actImgDB) window.actImgDB.del(S.photo); S.photo = ''; render(); return; }
+      if (t.closest('[data-pu-clear]')) { if (S.photo && window.actImgDB) window.actImgDB.del(S.photo); S.keep = null; resetForm(); render(); return; }
+      if (t.closest('[data-pu-save]')) { saveNew(); return; }
+    });
+    window.addEventListener('act-purchases-data-updated', function () { if (root) { if (S.tab !== 'new') render(); else refreshForm(); } });
+    window.addEventListener('act-accessories-data-updated', function () { if (root && S.tab === 'new') refreshForm(); });
+    window.addEventListener('act-user-data-ready', function () { try { if (API()) API().reload(); } catch (_) {} if (root && S.tab !== 'new') render(); });
+  }
+  function build(){
+    const sec = $('independent-purchases-section'); if (!sec || $('pur2-root') || !API()) return false;
+    root = document.createElement('div'); root.id = 'pur2-root'; root.className = 'pur2 sn'; sec.prepend(root); sec.classList.add('pur2-on');
+    bind(); render();
+    new MutationObserver(function () { if (sec.style.display !== 'none' && S.tab !== 'new') { try { API().reload(); } catch (_) {} render(); } }).observe(sec, { attributes: true, attributeFilter: ['style'] });
+    return true;
+  }
+  function init(){ if (!build()) setTimeout(build, 900); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(init, 600); }); else setTimeout(init, 600);
 })();
